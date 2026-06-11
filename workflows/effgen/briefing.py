@@ -77,13 +77,10 @@ def _build_prompt(config: BriefingConfig) -> str:
     parts += [
         "",
         "## Phase 2: Synthesize",
-        "Weather: the forecast operation returns DAILY data (temp_max, temp_min, conditions,",
-        "precipitation_prob, wind_speed_max). Use it to build three time-of-day buckets:",
-        "  - morning:   temp_f = temp_min (coolest part of day), note precip_prob and conditions",
-        "  - afternoon: temp_f = temp_max (peak heat), note precip_prob and conditions",
-        "  - evening:   temp_f = midpoint between temp_min and temp_max, note any precip chance",
-        "Write a distinct 1-sentence summary for each period based on those values.",
-        "ALL temperatures MUST be in Fahrenheit. Do NOT copy the same temp or summary to all three periods.",
+        "Weather: from the forecast data extract temp_max → temp_high_f, temp_min → temp_low_f,",
+        "conditions, precipitation_probability_max → precipitation_chance (integer 0-100),",
+        "wind_speed_max → wind_speed_max. Write a single summary sentence for the full day.",
+        "ALL temperatures MUST be in Fahrenheit.",
     ]
 
     if config.news_subjects:
@@ -111,7 +108,6 @@ def _build_prompt(config: BriefingConfig) -> str:
         "'weather' is always present (WeatherTool always runs).",
         "Omit the 'news' key entirely if no subjects were configured.",
         "Omit the 'stocks' key entirely if no stocks were configured.",
-        "The forecast dict MUST use exactly these keys: 'morning', 'afternoon', 'evening'.",
         f"Set 'date' to '{today}'.",
     ]
 
@@ -159,17 +155,17 @@ def _run_briefing_sync(model, config: BriefingConfig) -> tuple[BriefingOutput, i
 def _format_briefing_note(output: BriefingOutput) -> str:
     lines = [f"# Morning Briefing — {output.date}", ""]
     w = output.weather
+    f = w.forecast
+    precip = f" | {f.precipitation_chance}% precip" if f.precipitation_chance is not None else ""
+    wind = f" | wind max {f.wind_speed_max} mph" if f.wind_speed_max is not None else ""
     lines += [
         "## Weather", "",
         f"**Location:** {w.location}",
         f"**Now:** {w.current.temp_f}°F, {w.current.condition}, {w.current.humidity} humidity, wind {w.current.wind}",
+        f"**Forecast:** High {f.temp_high_f}°F / Low {f.temp_low_f}°F, {f.condition}{precip}{wind}",
+        f"_{f.summary}_",
         "",
-        "| Period | Temp | Condition |",
-        "|--------|------|-----------|",
     ]
-    for period, data in w.forecast.items():
-        lines.append(f"| {period.capitalize()} | {data.temp_f}°F | {data.condition} |")
-    lines.append("")
 
     if output.news:
         lines += ["## News", ""]

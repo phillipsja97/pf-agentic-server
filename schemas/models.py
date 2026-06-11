@@ -85,12 +85,6 @@ class AddStocksRequest(BaseModel):
 
 # --- briefing output models ---
 
-class WeatherPeriod(BaseModel):
-    temp_f: float
-    condition: str
-    summary: str
-
-
 class WeatherCurrent(BaseModel):
     temp_f: float
     condition: str
@@ -98,10 +92,19 @@ class WeatherCurrent(BaseModel):
     wind: str
 
 
+class WeatherForecast(BaseModel):
+    temp_high_f: float
+    temp_low_f: float
+    condition: str
+    precipitation_chance: Optional[int] = None
+    wind_speed_max: Optional[float] = None
+    summary: str
+
+
 class WeatherOutput(BaseModel):
     location: str
     current: WeatherCurrent
-    forecast: dict[str, WeatherPeriod]
+    forecast: WeatherForecast
 
 
 class NewsStory(BaseModel):
