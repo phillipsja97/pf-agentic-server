@@ -4,15 +4,18 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     obsidian_vault_path: Path = Path("./vault")
+    brain_vault_path: Path = Path("./brain")
+    coding_brain_path: Path = Path.home() / ".coding-agent"
+    projects_path: Path = Path.home() / "Projects"
     sqlite_path: Path = Path("./data/jobs.db")
 
-    langfuse_secret_key: str = ""
-    langfuse_public_key: str = ""
-    langfuse_host: str = "http://localhost:3000"
+    # langfuse_secret_key: str = ""
+    # langfuse_public_key: str = ""
+    # langfuse_host: str = "http://localhost:3000"
 
-    model_path: Path = Path("./models/qwen3-8b.gguf")
-    model_n_ctx: int = 8192
-    model_n_gpu_layers: int = 0
+    llm_base_url: str = "http://localhost:8080/v1"
+    llm_api_key: str = "none"
+    llm_model: str = "local"
 
     host: str = "0.0.0.0"
     port: int = 8000

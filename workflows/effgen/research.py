@@ -7,9 +7,20 @@ from pydantic import BaseModel
 from config import settings
 from core.logging import logger
 from core.storage.jobs import update_job
-from core.storage.obsidian import write_note
+from core.storage.obsidian import write_brain_note
 from core.tracing import observe
 from schemas.models import ResearchRequest
+
+
+def _load_model():
+    from effgen import load_model
+    return load_model(
+        settings.llm_model,
+        provider="openai",
+        api_key=settings.llm_api_key,
+        base_url=settings.llm_base_url,
+    )
+
 
 _model = None
 _model_lock = asyncio.Lock()
@@ -28,28 +39,17 @@ async def _get_model():
     async with _model_lock:
         if _model is not None:
             return _model
-        logger.info(f"Loading GGUF model  path={settings.model_path}")
-        model = await asyncio.to_thread(_load_model_sync)
+        logger.info(f"Connecting to LLM  base_url={settings.llm_base_url}  model={settings.llm_model}")
+        model = await asyncio.to_thread(_load_model)
         _model = model
-        logger.info("Model loaded and cached")
+        logger.info("LLM connection ready")
     return _model
-
-
-def _load_model_sync():
-    from effgen import load_model
-    return load_model(
-        str(settings.model_path),
-        engine_config={
-            "n_ctx": settings.model_n_ctx,
-            "n_gpu_layers": settings.model_n_gpu_layers,
-        },
-    )
 
 
 def _run_agent_sync(model, query: str, depth: str) -> tuple[ResearchOutput, list[str], int]:
     from effgen import create_agent
 
-    agent = create_agent("research", model)
+    agent = create_agent("research", model, tool_calling_mode="react")
 
     depth_instruction = {
         "quick": "Provide a concise overview with 2-3 key findings.",
@@ -58,7 +58,7 @@ def _run_agent_sync(model, query: str, depth: str) -> tuple[ResearchOutput, list
     }.get(depth, "Provide a thorough summary with 3-5 key findings.")
 
     task = (
-        f"{query} /no_think\n\n"
+        f"{query}\n\n"
         f"{depth_instruction} "
         "Structure your response with: a summary paragraph, key findings as a list, "
         "and all sources referenced."
@@ -67,8 +67,13 @@ def _run_agent_sync(model, query: str, depth: str) -> tuple[ResearchOutput, list
     response = agent.run(task, output_model=ResearchOutput)
 
     if not response.success:
+        reason = (response.metadata or {}).get("reason", "unknown")
+        error = (response.metadata or {}).get("error", "")
         raise RuntimeError(
             f"Agent did not succeed after {response.iterations} iterations"
+            f"  reason={reason}"
+            + (f"  error={error}" if error else "")
+            + (f"  output={response.output[:200]!r}" if response.output else "")
         )
 
     parsed: Optional[ResearchOutput] = response.metadata.get("parsed")
@@ -109,16 +114,22 @@ async def run_research(job_id: str, request: ResearchRequest) -> None:
     try:
         model = await _get_model()
 
-        parsed, agent_sources, tokens_used = await asyncio.to_thread(
-            _run_agent_sync, model, request.query, request.depth
-        )
+        try:
+            parsed, agent_sources, tokens_used = await asyncio.to_thread(
+                _run_agent_sync, model, request.query, request.depth
+            )
+        except Exception as e:
+            if "connection" in str(e).lower():
+                global _model
+                _model = None
+                logger.warning("LLM connection lost — cleared model cache")
+            raise
 
-        # deduplicate, preserve order, prefer parsed sources first
         all_sources = list(dict.fromkeys(parsed.sources + agent_sources))
 
         slug = _slugify(request.query)
-        note_path = write_note(
-            "Research",
+        note_path = write_brain_note(
+            "raw/notes",
             slug,
             _format_note(request.query, parsed, all_sources),
             frontmatter={"query": f'"{request.query}"', "depth": request.depth},

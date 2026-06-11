@@ -16,6 +16,11 @@ class ResearchRequest(BaseModel):
     depth: str = "standard"
 
 
+class CodingRequest(BaseModel):
+    idea: str
+    slug: Optional[str] = None
+
+
 class JobCreatedResponse(BaseModel):
     job_id: str
 

@@ -2,7 +2,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from core.logging import logger
 from core.storage.jobs import create_job, get_job, list_jobs
-from schemas.models import JobCreatedResponse, JobStatusResponse, ResearchRequest
+from schemas.models import CodingRequest, JobCreatedResponse, JobStatusResponse, ResearchRequest
 
 router = APIRouter(tags=["workflows"])
 
@@ -15,6 +15,17 @@ async def trigger_research(
     from workflows.effgen.research import run_research
     background_tasks.add_task(run_research, job_id, request)
     logger.info(f"job {job_id} queued  workflow=research  query={request.query!r}")
+    return JobCreatedResponse(job_id=job_id)
+
+
+@router.post("/coding", response_model=JobCreatedResponse)
+async def trigger_coding(
+    request: CodingRequest, background_tasks: BackgroundTasks
+) -> JobCreatedResponse:
+    job_id = await create_job("coding", request.model_dump())
+    from workflows.coding.app_builder import run_app_builder
+    background_tasks.add_task(run_app_builder, job_id, request)
+    logger.info(f"job {job_id} queued  workflow=coding  idea={request.idea[:60]!r}")
     return JobCreatedResponse(job_id=job_id)
 
 
