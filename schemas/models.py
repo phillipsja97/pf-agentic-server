@@ -51,7 +51,6 @@ class StockEntry(BaseModel):
 
 class BriefingConfig(BaseModel):
     weather_location: str = "Nashville, Tennessee"
-    weather_units: str = "fahrenheit"
     news_subjects: list[str] = []
     rss_feeds: list[str] = []
     stocks: list[StockEntry] = []

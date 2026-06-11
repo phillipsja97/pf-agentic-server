@@ -79,11 +79,12 @@ async def remove_rss_feed(request: RemoveRSSFeedRequest) -> BriefingConfig:
 @router.post("/config/stocks", response_model=BriefingConfig)
 async def add_stocks(request: AddStocksRequest) -> BriefingConfig:
     config = load_config(settings.briefing_config_path)
-    existing = {s.ticker for s in config.stocks}
+    existing = {s.ticker.upper() for s in config.stocks}
     for stock in request.stocks:
-        if stock.ticker not in existing:
-            config.stocks.append(stock)
-            existing.add(stock.ticker)
+        upper = stock.ticker.upper()
+        if upper not in existing:
+            config.stocks.append(stock.model_copy(update={"ticker": upper}))
+            existing.add(upper)
     save_config(settings.briefing_config_path, config)
     return config
 
