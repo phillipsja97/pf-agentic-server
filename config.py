@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     coding_brain_path: Path = Path.home() / ".coding-agent"
     projects_path: Path = Path.home() / "Projects"
     sqlite_path: Path = Path("./data/jobs.db")
+    briefing_config_path: Path = Path("./data/briefing_config.json")
 
     # langfuse_secret_key: str = ""
     # langfuse_public_key: str = ""
