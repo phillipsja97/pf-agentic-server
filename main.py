@@ -8,6 +8,7 @@ from core.logging import logger
 from core.storage.db import init_db
 # from core.tracing import setup_tracing
 from routers import health, workflows
+from routers import briefing_config
 
 
 @asynccontextmanager
@@ -40,3 +41,4 @@ async def log_requests(request: Request, call_next) -> Response:
 
 app.include_router(health.router)
 app.include_router(workflows.router, prefix="/workflows")
+app.include_router(briefing_config.router)
