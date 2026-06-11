@@ -126,6 +126,7 @@ def _run_briefing_sync(model, config: BriefingConfig) -> tuple[BriefingOutput, i
         model,
         extra_tools=extra_tools,
         tool_calling_mode="react",
+        max_iterations=30,
     )
 
     task = _build_prompt(config)
