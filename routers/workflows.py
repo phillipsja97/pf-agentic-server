@@ -29,6 +29,15 @@ async def trigger_coding(
     return JobCreatedResponse(job_id=job_id)
 
 
+@router.post("/briefing", response_model=JobCreatedResponse)
+async def trigger_briefing(background_tasks: BackgroundTasks) -> JobCreatedResponse:
+    job_id = await create_job("briefing", {})
+    from workflows.effgen.briefing import run_briefing
+    background_tasks.add_task(run_briefing, job_id)
+    logger.info(f"job {job_id} queued  workflow=briefing")
+    return JobCreatedResponse(job_id=job_id)
+
+
 @router.get("/{job_id}", response_model=JobStatusResponse)
 async def get_workflow_status(job_id: str) -> JobStatusResponse:
     job = await get_job(job_id)
