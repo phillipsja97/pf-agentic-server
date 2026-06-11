@@ -77,8 +77,13 @@ def _build_prompt(config: BriefingConfig) -> str:
     parts += [
         "",
         "## Phase 2: Synthesize",
-        "Weather: organize forecast data into morning (6am–12pm), afternoon (12pm–6pm),",
-        "and evening (6pm–11pm) time buckets. ALL temperatures MUST be in Fahrenheit.",
+        "Weather: the forecast operation returns DAILY data (temp_max, temp_min, conditions,",
+        "precipitation_prob, wind_speed_max). Use it to build three time-of-day buckets:",
+        "  - morning:   temp_f = temp_min (coolest part of day), note precip_prob and conditions",
+        "  - afternoon: temp_f = temp_max (peak heat), note precip_prob and conditions",
+        "  - evening:   temp_f = midpoint between temp_min and temp_max, note any precip chance",
+        "Write a distinct 1-sentence summary for each period based on those values.",
+        "ALL temperatures MUST be in Fahrenheit. Do NOT copy the same temp or summary to all three periods.",
     ]
 
     if config.news_subjects:
@@ -141,7 +146,12 @@ def _run_briefing_sync(model, config: BriefingConfig) -> tuple[BriefingOutput, i
 
     parsed: Optional[BriefingOutput] = (response.metadata or {}).get("parsed")
     if parsed is None:
-        raise RuntimeError("Agent succeeded but output could not be parsed as BriefingOutput")
+        raw = response.output or ""
+        logger.error(f"BriefingOutput parse failed  raw={raw[:1000]!r}")
+        raise RuntimeError(
+            "Agent succeeded but output could not be parsed as BriefingOutput"
+            + (f"  raw={raw[:300]!r}" if raw else "")
+        )
 
     return parsed, response.tokens_used
 
