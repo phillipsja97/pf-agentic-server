@@ -59,6 +59,9 @@ def _build_prompt(config: BriefingConfig) -> str:
             f"2. For each of these subjects: {subjects_str}",
             "   - Call NewsTool with operation='search', query=<subject>, max_results=2",
             "   - Call HackerNewsTool with operation='top_stories', n=20, then pick up to 2 stories relevant to <subject> (skip if none match)",
+            "   IMPORTANT: you MUST actually call these tools and use ONLY the exact titles, URLs, and",
+            "   summaries returned in the tool output. Do NOT invent, guess, or paraphrase any story.",
+            "   If a tool returns no results, include nothing from that tool — do not fill in with made-up stories.",
         ]
         if config.rss_feeds:
             feeds_str = ", ".join(f"'{f}'" for f in config.rss_feeds)
@@ -85,8 +88,10 @@ def _build_prompt(config: BriefingConfig) -> str:
 
     if config.news_subjects:
         parts += [
-            "News: for each subject, merge results from all tools into a single story list.",
-            "If two items describe the same event, keep the one with more detail (drop the duplicate).",
+            "News: for each subject, merge ONLY the stories actually returned by the tools.",
+            "Use the exact title, url, and source from the tool output — never paraphrase or invent.",
+            "If two stories from different tools describe the same event, keep the one with more detail.",
+            "If a tool returned no results for a subject, omit it — do not substitute made-up content.",
         ]
 
     if config.stocks:
