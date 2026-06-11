@@ -127,3 +127,23 @@ def test_remove_stock_case_insensitive(client):
     r = client.delete("/briefing/config/stocks/aapl")
     assert r.status_code == 200
     assert all(s["ticker"] != "AAPL" for s in r.json()["stocks"])
+
+
+def test_trigger_briefing_creates_job(client, monkeypatch):
+    # Patch run_briefing to a no-op so the test doesn't need a live LLM
+    import workflows.effgen.briefing as briefing_module
+
+    async def _noop(job_id: str):
+        pass
+
+    monkeypatch.setattr(briefing_module, "run_briefing", _noop)
+
+    r = client.post("/workflows/briefing")
+    assert r.status_code == 200
+    job_id = r.json()["job_id"]
+    assert job_id
+
+    r2 = client.get(f"/workflows/{job_id}")
+    assert r2.status_code == 200
+    assert r2.json()["type"] == "briefing"
+    assert r2.json()["status"] == "pending"
