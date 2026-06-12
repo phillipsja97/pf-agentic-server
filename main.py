@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request, Response
 from config import settings
 from core.logging import logger
 from core.storage.db import init_db
-# from core.tracing import setup_tracing
+from core.tracing import setup_tracing
 from routers import health, workflows
 from routers import briefing_config
 
@@ -15,7 +15,7 @@ from routers import briefing_config
 async def lifespan(app: FastAPI):
     logger.info("Starting agentic server...")
     await init_db()
-    # setup_tracing()
+    setup_tracing()
     logger.info(f"Server ready  host={settings.host}  port={settings.port}")
     yield
     logger.info("Shutting down")

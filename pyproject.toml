@@ -8,7 +8,7 @@ dependencies = [
     "pydantic-settings>=2.6.0",
     "aiosqlite>=0.20.0",
     "colorlog>=6.9.0",
-    # "langfuse>=2.0.0",
+    "langfuse>=2.0.0",
     "python-dotenv>=1.0.0",
     "effgen",
 ]

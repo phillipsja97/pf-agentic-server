@@ -10,9 +10,9 @@ class Settings(BaseSettings):
     sqlite_path: Path = Path("./data/jobs.db")
     briefing_config_path: Path = Path("./data/briefing_config.json")
 
-    # langfuse_secret_key: str = ""
-    # langfuse_public_key: str = ""
-    # langfuse_host: str = "http://localhost:3000"
+    langfuse_secret_key: str = ""
+    langfuse_public_key: str = ""
+    langfuse_host: str = "http://localhost:3000"
 
     llm_base_url: str = "http://localhost:8080/v1"
     llm_api_key: str = "none"

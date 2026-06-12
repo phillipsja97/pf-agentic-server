@@ -1,30 +1,28 @@
-# from config import settings
+from config import settings
 from core.logging import logger
 
 _tracing_enabled = False
 
 
 def setup_tracing() -> bool:
-    # global _tracing_enabled
-    # if not settings.langfuse_secret_key or not settings.langfuse_public_key:
-    #     logger.warning("LangFuse keys not set — tracing disabled")
-    #     return False
+    global _tracing_enabled
+    if not settings.langfuse_secret_key or not settings.langfuse_public_key:
+        logger.info("LangFuse keys not set — tracing disabled")
+        return False
 
-    # try:
-    #     import langfuse
-    #     langfuse.Langfuse(
-    #         secret_key=settings.langfuse_secret_key,
-    #         public_key=settings.langfuse_public_key,
-    #         host=settings.langfuse_host,
-    #     )
-    #     _tracing_enabled = True
-    #     logger.info(f"LangFuse tracing enabled  host={settings.langfuse_host}")
-    #     return True
-    # except Exception as e:
-    #     logger.error(f"LangFuse init failed: {e}")
-    #     return False
-    logger.info("LangFuse tracing disabled")
-    return False
+    try:
+        import langfuse
+        langfuse.Langfuse(
+            secret_key=settings.langfuse_secret_key,
+            public_key=settings.langfuse_public_key,
+            host=settings.langfuse_host,
+        )
+        _tracing_enabled = True
+        logger.info(f"LangFuse tracing enabled  host={settings.langfuse_host}")
+        return True
+    except Exception as e:
+        logger.error(f"LangFuse init failed: {e}")
+        return False
 
 
 def is_tracing_enabled() -> bool:
@@ -32,10 +30,9 @@ def is_tracing_enabled() -> bool:
 
 
 def observe(*args, **kwargs):
-    """No-op decorator — langfuse disabled."""
-    # if _tracing_enabled:
-    #     from langfuse.decorators import observe as _observe
-    #     return _observe(*args, **kwargs)
+    if _tracing_enabled:
+        from langfuse import observe as _observe
+        return _observe(*args, **kwargs)
 
     def passthrough(fn):
         return fn
