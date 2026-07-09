@@ -27,6 +27,7 @@ class JobCreatedResponse(BaseModel):
 
 class JobStatusResponse(BaseModel):
     id: str
+    user_id: Optional[str] = None
     type: str
     status: JobStatus
     input: Optional[dict] = None
@@ -138,3 +139,21 @@ class BriefingOutput(BaseModel):
     weather: WeatherOutput
     news: Optional[list[NewsSubjectOutput]] = None
     stocks: Optional[StocksOutput] = None
+
+
+# --- RAG workflow models ---
+
+class RagIngestRequest(BaseModel):
+    source: str          # path to file or directory to ingest
+    collection_id: str   # slug identifying this knowledge base, e.g. "my-docs"
+
+
+class RagChatTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class RagChatRequest(BaseModel):
+    collection_id: str
+    message: str
+    history: list[RagChatTurn] = []

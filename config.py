@@ -17,9 +17,15 @@ class Settings(BaseSettings):
     llm_base_url: str = "http://localhost:8080/v1"
     llm_api_key: str = "none"
     llm_model: str = "local"
+    llm_max_tokens: int | None = None
 
     host: str = "0.0.0.0"
-    port: int = 8000
+    port: int = 8060
+
+    jwt_secret: str = "change-me-in-production"
+
+    anthropic_api_key: str = ""
+    openai_api_key: str = ""
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import uuid
 from datetime import datetime, timezone
@@ -12,12 +13,15 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-async def create_job(job_type: str, input_data: dict) -> str:
+async def create_job(
+    job_type: str, input_data: dict, user_id: Optional[str] = None
+) -> str:
     job_id = str(uuid.uuid4())
     async with get_db() as db:
         await db.execute(
-            "INSERT INTO jobs (id, type, status, input, created_at, updated_at) VALUES (?, ?, 'pending', ?, ?, ?)",
-            (job_id, job_type, json.dumps(input_data), _now(), _now()),
+            "INSERT INTO jobs (id, user_id, type, status, input, created_at, updated_at)"
+            " VALUES (?, ?, ?, 'pending', ?, ?, ?)",
+            (job_id, user_id, job_type, json.dumps(input_data), _now(), _now()),
         )
         await db.commit()
     return job_id
@@ -48,12 +52,49 @@ async def update_job(
             )
         await db.commit()
 
+    if status in ("completed", "failed"):
+        asyncio.create_task(_notify_job_done(job_id, status, error))
 
-async def get_job(job_id: str) -> Optional[dict]:
+
+async def _notify_job_done(job_id: str, status: str, error: Optional[str]) -> None:
+    try:
+        job = await get_job(job_id)
+        if not job or not job.get("user_id"):
+            return
+        from core.storage.users import get_push_tokens_for_user
+        from core.push import send_push_notifications
+
+        tokens = await get_push_tokens_for_user(job["user_id"])
+        if not tokens:
+            return
+
+        job_type = job.get("type", "workflow")
+        if status == "completed":
+            title = f"{job_type} completed"
+            body = f"Your {job_type} job finished."
+        else:
+            msg = error or "unknown error"
+            title = f"{job_type} failed"
+            body = f"Your {job_type} job failed: {msg}"
+
+        await send_push_notifications(tokens, title, body, job_id)
+    except Exception:
+        pass
+
+
+async def get_job(job_id: str, user_id: Optional[str] = None) -> Optional[dict]:
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM jobs WHERE id=?", (job_id,)) as cursor:
-            row = await cursor.fetchone()
+        if user_id is not None:
+            async with db.execute(
+                "SELECT * FROM jobs WHERE id=? AND user_id=?", (job_id, user_id)
+            ) as cursor:
+                row = await cursor.fetchone()
+        else:
+            async with db.execute(
+                "SELECT * FROM jobs WHERE id=?", (job_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
     if row is None:
         return None
     record = dict(row)
@@ -64,10 +105,26 @@ async def get_job(job_id: str) -> Optional[dict]:
     return record
 
 
-async def list_jobs(job_type: Optional[str] = None, limit: int = 50) -> list[dict]:
+async def list_jobs(
+    job_type: Optional[str] = None,
+    limit: int = 50,
+    user_id: Optional[str] = None,
+) -> list[dict]:
     async with get_db() as db:
         db.row_factory = aiosqlite.Row
-        if job_type:
+        if user_id is not None and job_type:
+            async with db.execute(
+                "SELECT * FROM jobs WHERE user_id=? AND type=? ORDER BY created_at DESC LIMIT ?",
+                (user_id, job_type, limit),
+            ) as cursor:
+                rows = await cursor.fetchall()
+        elif user_id is not None:
+            async with db.execute(
+                "SELECT * FROM jobs WHERE user_id=? ORDER BY created_at DESC LIMIT ?",
+                (user_id, limit),
+            ) as cursor:
+                rows = await cursor.fetchall()
+        elif job_type:
             async with db.execute(
                 "SELECT * FROM jobs WHERE type=? ORDER BY created_at DESC LIMIT ?",
                 (job_type, limit),

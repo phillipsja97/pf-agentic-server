@@ -208,8 +208,12 @@ def _select_stories_sync(model, subject: str, candidates: list[dict]) -> tuple[l
         f"Return {{\"indices\": []}} if none are relevant.\n\n{listing}"
     )
 
-    agent = create_agent("minimal", model, extra_tools=[], tool_calling_mode="react", max_iterations=3)
-    response = agent.run(prompt, output_model=_StorySelection)
+    agent = create_agent("minimal", model, extra_tools=[], tool_calling_mode="react", max_iterations=3,
+                         max_context_length=settings.llm_max_tokens)
+    run_kwargs: dict = {}
+    if settings.llm_max_tokens is not None:
+        run_kwargs["max_tokens"] = settings.llm_max_tokens
+    response = agent.run(prompt, output_model=_StorySelection, **run_kwargs)
 
     parsed: Optional[_StorySelection] = (response.metadata or {}).get("parsed")
     if is_tracing_enabled():
@@ -351,8 +355,12 @@ async def _run_stocks(model, config: BriefingConfig) -> tuple[StocksOutput, int]
 
 def _run_narrative_sync(model, prompt: str) -> tuple[str, int]:
     from effgen import create_agent
-    agent = create_agent("minimal", model, extra_tools=[], tool_calling_mode="react", max_iterations=3)
-    response = agent.run(prompt)
+    agent = create_agent("minimal", model, extra_tools=[], tool_calling_mode="react", max_iterations=3,
+                         max_context_length=settings.llm_max_tokens)
+    run_kwargs: dict = {}
+    if settings.llm_max_tokens is not None:
+        run_kwargs["max_tokens"] = settings.llm_max_tokens
+    response = agent.run(prompt, **run_kwargs)
     return response.output or "", response.tokens_used
 
 

@@ -49,13 +49,14 @@ async def _get_model():
 def _run_agent_sync(model, query: str, depth: str) -> tuple[ResearchOutput, list[str], int]:
     from effgen import create_agent
 
-    agent = create_agent("research", model, tool_calling_mode="react")
+    agent = create_agent("research", model, tool_calling_mode="react",
+                         max_context_length=settings.llm_max_tokens)
 
     depth_instruction = {
         "quick": "Provide a concise overview with 2-3 key findings.",
-        "standard": "Provide a thorough summary with 3-5 key findings.",
-        "deep": "Provide a comprehensive analysis with 5-7 key findings and extensive source coverage.",
-    }.get(depth, "Provide a thorough summary with 3-5 key findings.")
+        "standard": "Provide a thorough summary with 5-7 key findings.",
+        "deep": "Provide a comprehensive analysis with 7-10 key findings and extensive source coverage.",
+    }.get(depth, "Provide a thorough summary with 5-7 key findings.")
 
     task = (
         f"{query}\n\n"
@@ -64,7 +65,10 @@ def _run_agent_sync(model, query: str, depth: str) -> tuple[ResearchOutput, list
         "and all sources referenced."
     )
 
-    response = agent.run(task, output_model=ResearchOutput)
+    run_kwargs: dict = {}
+    if settings.llm_max_tokens is not None:
+        run_kwargs["max_tokens"] = settings.llm_max_tokens
+    response = agent.run(task, output_model=ResearchOutput, **run_kwargs)
 
     if not response.success:
         reason = (response.metadata or {}).get("reason", "unknown")
