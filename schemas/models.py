@@ -141,6 +141,33 @@ class BriefingOutput(BaseModel):
     stocks: Optional[StocksOutput] = None
 
 
+# --- learning plan workflow models ---
+
+class LearningPlanChild(BaseModel):
+    id: int
+    name: str
+    notes: str
+
+
+class LearningPlanGapNode(BaseModel):
+    id: str
+    name: Optional[str] = None
+    description: str
+
+
+class LearningPlanLog(BaseModel):
+    date: str
+    description: str
+
+
+class LearningPlanRequest(BaseModel):
+    child: LearningPlanChild
+    week_start: str
+    focus_note: str = ""
+    gap_nodes: list[LearningPlanGapNode] = []
+    recent_logs: list[LearningPlanLog] = []
+
+
 # --- RAG workflow models ---
 
 class RagIngestRequest(BaseModel):

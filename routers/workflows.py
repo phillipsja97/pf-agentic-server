@@ -8,6 +8,7 @@ from schemas.models import (
     CodingRequest,
     JobCreatedResponse,
     JobStatusResponse,
+    LearningPlanRequest,
     RagChatRequest,
     RagIngestRequest,
     ResearchRequest,
@@ -92,6 +93,27 @@ async def rag_chat(
             if chunk.startswith("data: ") and "[DONE]" not in chunk and "[ERROR]" not in chunk:
                 content += chunk[len("data: "):].rstrip("\n")
         return JSONResponse({"content": content})
+
+
+@router.post("/learning-plan", response_model=JobCreatedResponse)
+async def trigger_learning_plan(
+    request: LearningPlanRequest, background_tasks: BackgroundTasks
+) -> JobCreatedResponse:
+    # No auth — called service-to-service from kids-learning (no user token available)
+    job_id = await create_job("learning-plan", request.model_dump())
+    from workflows.effgen.learning_plan import run_learning_plan
+    background_tasks.add_task(run_learning_plan, job_id, request)
+    logger.info(f"job {job_id} queued  workflow=learning-plan  child={request.child.name!r}")
+    return JobCreatedResponse(job_id=job_id)
+
+
+@router.get("/learning-plan/{job_id}", response_model=JobStatusResponse)
+async def get_learning_plan_status(job_id: str) -> JobStatusResponse:
+    # No auth — polled service-to-service from kids-learning
+    job = await get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id!r} not found")
+    return JobStatusResponse(**job)
 
 
 @router.get("/{job_id}", response_model=JobStatusResponse)
