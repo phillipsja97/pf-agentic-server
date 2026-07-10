@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 from typing import Optional
 
 from pydantic import BaseModel
@@ -102,10 +103,34 @@ def _run_agent_sync(model, request: LearningPlanRequest) -> _LearningPlan:
         )
 
     parsed: Optional[_LearningPlan] = (response.metadata or {}).get("parsed")
-    if parsed is None:
-        raise RuntimeError("No structured output from learning-plan agent")
+    if parsed is not None:
+        return parsed
 
-    return parsed
+    # Fallback: the model likely emitted a raw JSON array instead of {"activities": [...]}.
+    # Regex-extract the first array from the raw output and coerce it.
+    output = response.output or ""
+    array_match = re.search(r'\[[\s\S]*\]', output)
+    if array_match:
+        try:
+            items = json.loads(array_match.group())
+            if isinstance(items, list) and items:
+                return _LearningPlan(activities=[_ActivityCard(**a) for a in items])
+        except (json.JSONDecodeError, TypeError, ValueError):
+            pass
+
+    # Also try an object wrapper with an "activities" key
+    obj_match = re.search(r'\{[\s\S]*\}', output)
+    if obj_match:
+        try:
+            data = json.loads(obj_match.group())
+            if isinstance(data, dict) and "activities" in data:
+                return _LearningPlan(activities=[_ActivityCard(**a) for a in data["activities"]])
+        except (json.JSONDecodeError, TypeError, ValueError):
+            pass
+
+    raise RuntimeError(
+        f"No structured output from learning-plan agent (output: {output[:300]!r})"
+    )
 
 
 @observe(name="learning-plan-workflow")
