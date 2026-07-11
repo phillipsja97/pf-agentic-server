@@ -12,6 +12,8 @@ from schemas.models import (
     RagChatRequest,
     RagIngestRequest,
     ResearchRequest,
+    SoccerAnalystRequest,
+    SoccerAnalystResponse,
 )
 
 router = APIRouter(tags=["workflows"])
@@ -125,6 +127,19 @@ async def get_workflow_status(
     if not job:
         raise HTTPException(status_code=404, detail=f"Job {job_id!r} not found")
     return JobStatusResponse(**job)
+
+
+@router.post("/soccer-analyst", response_model=SoccerAnalystResponse)
+async def soccer_analyst(request: SoccerAnalystRequest) -> SoccerAnalystResponse:
+    import routers.workflows as _self
+    if not hasattr(_self, "run_soccer_analyst"):
+        from workflows.soccer.analyst import run_soccer_analyst as _fn
+        _self.run_soccer_analyst = _fn
+    try:
+        return await _self.run_soccer_analyst(request)
+    except Exception as e:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=422, content={"error": str(e)})
 
 
 @router.get("/", response_model=list[JobStatusResponse])
