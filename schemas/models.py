@@ -184,3 +184,25 @@ class RagChatRequest(BaseModel):
     collection_id: str
     message: str
     history: list[RagChatTurn] = []
+
+
+# --- soccer analyst workflow models ---
+
+class SoccerQueryPlan(BaseModel):
+    sql: str
+    chart_type: str
+    x_column: str
+    y_column: str
+    title: str
+
+
+class SoccerAnalystRequest(BaseModel):
+    question: str
+
+
+class SoccerAnalystResponse(BaseModel):
+    question: str
+    sql: str
+    data: list[dict]
+    chart: dict
+    row_count: int
