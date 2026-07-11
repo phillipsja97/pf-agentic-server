@@ -65,7 +65,7 @@ class SoccerQueryPlan(BaseModel):
     title: str             # chart title
 ```
 
-Passed as `output_model=SoccerQueryPlan` to `effgen.create_agent` (or direct model call if effgen supports it without an agent preset).
+Passed as `output_model=SoccerQueryPlan` to `effgen.create_agent`. If effgen requires a named preset for `output_model` to work (as in `research.py`), fall back to calling the model directly via the OpenAI-compatible HTTP client (`openai.OpenAI(base_url=...).chat.completions.create(...)`) and parsing the JSON response manually.
 
 **System prompt:**
 ```
