@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     openai_api_key: str = ""
 
+    minio_endpoint: str = ""
+    minio_access_key: str = ""
+    minio_secret_key: str = ""
+    minio_bucket: str = "soccer"
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 
