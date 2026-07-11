@@ -103,3 +103,60 @@ def test_call_llm_sync_strips_markdown_fences(monkeypatch):
     )
     result = _call_llm_sync(mock_client, "test prompt")
     assert result.sql == "SELECT 1"
+
+
+import duckdb
+import polars as pl
+from workflows.soccer.analyst import _execute_sql, _build_plotly_figure
+
+
+def _make_in_memory_con() -> duckdb.DuckDBPyConnection:
+    con = duckdb.connect()
+    con.execute(
+        "CREATE TABLE player_season AS SELECT 'Salah' AS player, 20 AS goals, "
+        "'FW' AS position, 2024 AS season"
+    )
+    return con
+
+
+def test_execute_sql_returns_polars_df():
+    con = _make_in_memory_con()
+    df = _execute_sql(con, "SELECT player, goals FROM player_season")
+    assert isinstance(df, pl.DataFrame)
+    assert df["player"][0] == "Salah"
+    assert df["goals"][0] == 20
+
+
+def test_execute_sql_raises_on_bad_sql():
+    con = _make_in_memory_con()
+    with pytest.raises(Exception):
+        _execute_sql(con, "SELECT * FROM nonexistent_table")
+
+
+def test_build_plotly_figure_bar_chart():
+    df = pl.DataFrame({"player": ["Salah", "Haaland"], "goals": [20, 25]})
+    plan = SoccerQueryPlan(
+        sql="SELECT player, goals FROM player_season LIMIT 2",
+        chart_type="bar",
+        x_column="player",
+        y_column="goals",
+        title="Top Scorers",
+    )
+    fig = _build_plotly_figure(df, plan)
+    assert fig["data"][0]["type"] == "bar"
+    assert fig["data"][0]["x"] == ["Salah", "Haaland"]
+    assert fig["data"][0]["y"] == [20, 25]
+    assert fig["layout"]["title"] == "Top Scorers"
+
+
+def test_build_plotly_figure_missing_column_returns_nones():
+    df = pl.DataFrame({"player": ["Salah"], "goals": [20]})
+    plan = SoccerQueryPlan(
+        sql="SELECT 1",
+        chart_type="bar",
+        x_column="player",
+        y_column="nonexistent",
+        title="T",
+    )
+    fig = _build_plotly_figure(df, plan)
+    assert fig["data"][0]["y"] == [None]

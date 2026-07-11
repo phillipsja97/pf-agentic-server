@@ -138,3 +138,54 @@ def _call_llm_sync(client: openai_lib.OpenAI, prompt: str) -> SoccerQueryPlan:
         if raw.startswith("json"):
             raw = raw[4:]
     return SoccerQueryPlan.model_validate_json(raw.strip())
+
+
+def _execute_sql(con: duckdb.DuckDBPyConnection, sql: str) -> pl.DataFrame:
+    return con.execute(sql).pl()
+
+
+def _build_plotly_figure(df: pl.DataFrame, plan: SoccerQueryPlan) -> dict:
+    rows = df.to_dicts()
+    x_vals = [r.get(plan.x_column) for r in rows]
+    y_vals = [r.get(plan.y_column) for r in rows]
+    return {
+        "data": [{
+            "type": plan.chart_type,
+            "x": x_vals,
+            "y": y_vals,
+            "name": plan.y_column,
+        }],
+        "layout": {
+            "title": plan.title,
+            "xaxis": {"title": plan.x_column},
+            "yaxis": {"title": plan.y_column},
+        },
+    }
+
+
+async def run_soccer_analyst(request: SoccerAnalystRequest) -> SoccerAnalystResponse:
+    client = await _get_client()
+    con = await _get_con()
+    prompt = _build_prompt(request.question)
+
+    plan = await asyncio.to_thread(_call_llm_sync, client, prompt)
+
+    try:
+        df = await asyncio.to_thread(_execute_sql, con, plan.sql)
+    except Exception as e:
+        retry_prompt = (
+            prompt
+            + f"\n\nThe previous query failed with this error: {e}\n"
+            "Fix the SQL and return corrected JSON."
+        )
+        plan = await asyncio.to_thread(_call_llm_sync, client, retry_prompt)
+        df = await asyncio.to_thread(_execute_sql, con, plan.sql)
+
+    chart = _build_plotly_figure(df, plan)
+    return SoccerAnalystResponse(
+        question=request.question,
+        sql=plan.sql,
+        data=df.to_dicts(),
+        chart=chart,
+        row_count=len(df),
+    )
