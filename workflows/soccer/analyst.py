@@ -2,6 +2,7 @@
 import asyncio
 from typing import Optional
 
+import openai as openai_lib
 import duckdb
 import polars as pl
 from deltalake import DeltaTable
@@ -77,3 +78,63 @@ async def _get_con() -> duckdb.DuckDBPyConnection:
             return _con
         _con = await asyncio.to_thread(_build_connection)
     return _con
+
+
+_SYSTEM_PROMPT = (
+    "You are a soccer data analyst. You write DuckDB SQL queries. "
+    "Tables are already loaded in memory — use plain table names, not delta_scan(). "
+    "Return only valid JSON with no explanation or markdown."
+)
+
+_client: Optional[openai_lib.OpenAI] = None
+_client_lock = asyncio.Lock()
+
+
+async def _get_client() -> openai_lib.OpenAI:
+    global _client
+    if _client is not None:
+        return _client
+    async with _client_lock:
+        if _client is not None:
+            return _client
+        _client = openai_lib.OpenAI(
+            base_url=settings.llm_base_url,
+            api_key=settings.llm_api_key,
+        )
+    return _client
+
+
+def _build_prompt(question: str) -> str:
+    schema_lines = [
+        f"{table}: {columns}"
+        for table, columns in _TABLE_SCHEMAS.items()
+    ]
+    schema_str = "\n".join(schema_lines)
+
+    return (
+        f"Answer this question about Premier League 2024 data: {question}\n\n"
+        f"Available tables (season column is integer 2024):\n{schema_str}\n\n"
+        "Return JSON with exactly these fields:\n"
+        '- sql: DuckDB SQL using plain table names (e.g. SELECT * FROM player_season)\n'
+        '- chart_type: one of "bar", "line", "scatter"\n'
+        "- x_column: column name for x axis\n"
+        "- y_column: column name for y axis\n"
+        "- title: descriptive chart title"
+    )
+
+
+def _call_llm_sync(client: openai_lib.OpenAI, prompt: str) -> SoccerQueryPlan:
+    response = client.chat.completions.create(
+        model=settings.llm_model,
+        messages=[
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+    )
+    raw = response.choices[0].message.content.strip()
+    if raw.startswith("```"):
+        parts = raw.split("```")
+        raw = parts[1] if len(parts) > 1 else raw
+        if raw.startswith("json"):
+            raw = raw[4:]
+    return SoccerQueryPlan.model_validate_json(raw.strip())

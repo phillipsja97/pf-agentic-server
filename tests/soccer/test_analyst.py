@@ -56,3 +56,50 @@ def test_build_connection_registers_tables(monkeypatch):
     assert "player_match" in tables
     assert "player_season" in tables
     assert "team_stats" in tables
+
+
+from workflows.soccer.analyst import _build_prompt, _call_llm_sync
+
+
+def test_build_prompt_contains_question():
+    prompt = _build_prompt("who scored the most goals?")
+    assert "who scored the most goals?" in prompt
+
+
+def test_build_prompt_contains_all_table_names():
+    prompt = _build_prompt("test")
+    assert "fixtures" in prompt
+    assert "player_match" in prompt
+    assert "player_season" in prompt
+    assert "team_stats" in prompt
+
+
+def test_build_prompt_mentions_season_type():
+    prompt = _build_prompt("test")
+    assert "2024" in prompt
+
+
+def test_call_llm_sync_parses_clean_json(monkeypatch):
+    from unittest.mock import MagicMock
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value.choices[0].message.content = (
+        '{"sql": "SELECT player FROM player_season LIMIT 5", '
+        '"chart_type": "bar", "x_column": "player", '
+        '"y_column": "goals", "title": "Top Scorers"}'
+    )
+    result = _call_llm_sync(mock_client, "test prompt")
+    assert result.sql == "SELECT player FROM player_season LIMIT 5"
+    assert result.chart_type == "bar"
+
+
+def test_call_llm_sync_strips_markdown_fences(monkeypatch):
+    from unittest.mock import MagicMock
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value.choices[0].message.content = (
+        "```json\n"
+        '{"sql": "SELECT 1", "chart_type": "bar", '
+        '"x_column": "a", "y_column": "b", "title": "T"}\n'
+        "```"
+    )
+    result = _call_llm_sync(mock_client, "test prompt")
+    assert result.sql == "SELECT 1"
