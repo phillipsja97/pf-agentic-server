@@ -105,8 +105,6 @@ def test_call_llm_sync_strips_markdown_fences(monkeypatch):
     assert result.sql == "SELECT 1"
 
 
-import duckdb
-import polars as pl
 from workflows.soccer.analyst import _execute_sql, _build_plotly_figure
 
 

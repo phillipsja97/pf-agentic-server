@@ -11,6 +11,12 @@ from config import settings
 from core.logging import logger
 from schemas.models import SoccerAnalystRequest, SoccerAnalystResponse, SoccerQueryPlan
 
+
+class SoccerAnalystError(Exception):
+    def __init__(self, message: str, sql: str):
+        super().__init__(message)
+        self.sql = sql
+
 _TABLE_PATHS = {
     "fixtures": "soccer/fixtures/",
     "player_match": "soccer/player_match/",
@@ -179,7 +185,10 @@ async def run_soccer_analyst(request: SoccerAnalystRequest) -> SoccerAnalystResp
             "Fix the SQL and return corrected JSON."
         )
         plan = await asyncio.to_thread(_call_llm_sync, client, retry_prompt)
-        df = await asyncio.to_thread(_execute_sql, con, plan.sql)
+        try:
+            df = await asyncio.to_thread(_execute_sql, con, plan.sql)
+        except Exception as e:
+            raise SoccerAnalystError(str(e), plan.sql)
 
     chart = _build_plotly_figure(df, plan)
     return SoccerAnalystResponse(

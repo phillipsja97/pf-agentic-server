@@ -15,6 +15,7 @@ from schemas.models import (
     SoccerAnalystRequest,
     SoccerAnalystResponse,
 )
+from workflows.soccer.analyst import run_soccer_analyst, SoccerAnalystError
 
 router = APIRouter(tags=["workflows"])
 
@@ -131,14 +132,11 @@ async def get_workflow_status(
 
 @router.post("/soccer-analyst", response_model=SoccerAnalystResponse)
 async def soccer_analyst(request: SoccerAnalystRequest) -> SoccerAnalystResponse:
-    import routers.workflows as _self
-    if not hasattr(_self, "run_soccer_analyst"):
-        from workflows.soccer.analyst import run_soccer_analyst as _fn
-        _self.run_soccer_analyst = _fn
     try:
-        return await _self.run_soccer_analyst(request)
+        return await run_soccer_analyst(request)
+    except SoccerAnalystError as e:
+        return JSONResponse(status_code=422, content={"error": str(e), "sql": e.sql})
     except Exception as e:
-        from fastapi.responses import JSONResponse
         return JSONResponse(status_code=422, content={"error": str(e)})
 
 
