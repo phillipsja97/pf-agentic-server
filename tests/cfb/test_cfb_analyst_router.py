@@ -29,7 +29,6 @@ def test_cfb_analyst_returns_200(client):
     with patch(
         "routers.workflows.run_cfb_analyst",
         new=AsyncMock(return_value=_mock_response()),
-        create=True,
     ):
         r = client.post(
             "/workflows/cfb-analyst",
@@ -48,7 +47,6 @@ def test_cfb_analyst_defaults_power4_true(client):
     with patch(
         "routers.workflows.run_cfb_analyst",
         new=AsyncMock(return_value=_mock_response()),
-        create=True,
     ) as mock_fn:
         client.post("/workflows/cfb-analyst", json={"question": "test"})
     call_args = mock_fn.call_args[0][0]
@@ -64,8 +62,20 @@ def test_cfb_analyst_returns_422_on_workflow_error(client):
     with patch(
         "routers.workflows.run_cfb_analyst",
         new=AsyncMock(side_effect=Exception("DuckDB error: table not found")),
-        create=True,
     ):
         r = client.post("/workflows/cfb-analyst", json={"question": "bad question"})
     assert r.status_code == 422
     assert "error" in r.json()
+
+
+def test_cfb_analyst_returns_422_with_sql_on_cfb_error(client):
+    from workflows.cfb.analyst import CfbAnalystError
+    with patch(
+        "routers.workflows.run_cfb_analyst",
+        new=AsyncMock(side_effect=CfbAnalystError("bad query", "SELECT * FROM nonexistent")),
+    ):
+        r = client.post("/workflows/cfb-analyst", json={"question": "bad question"})
+    assert r.status_code == 422
+    body = r.json()
+    assert "error" in body
+    assert body.get("sql") == "SELECT * FROM nonexistent"
