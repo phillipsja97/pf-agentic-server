@@ -42,7 +42,7 @@ def test_build_connection_registers_tables(monkeypatch):
     monkeypatch.setattr(settings, "minio_endpoint", "http://fake:9000")
     monkeypatch.setattr(settings, "minio_access_key", "key")
     monkeypatch.setattr(settings, "minio_secret_key", "secret")
-    monkeypatch.setattr(settings, "minio_bucket", "soccer")
+    monkeypatch.setattr(settings, "minio_bucket", "sports-data")
 
     mock_dt = MagicMock()
     mock_dt.to_pyarrow_table.return_value = _make_arrow_table()

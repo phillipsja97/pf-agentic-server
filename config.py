@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     minio_endpoint: str = ""
     minio_access_key: str = ""
     minio_secret_key: str = ""
-    minio_bucket: str = "soccer"
+    minio_bucket: str = "sports-data"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

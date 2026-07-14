@@ -193,11 +193,13 @@ class SoccerQueryPlan(BaseModel):
     chart_type: str
     x_column: str
     y_column: str
+    series_column: Optional[str] = None
     title: str
 
 
 class SoccerAnalystRequest(BaseModel):
     question: str
+    league: Optional[str] = None
 
 
 class SoccerAnalystResponse(BaseModel):
@@ -206,3 +208,8 @@ class SoccerAnalystResponse(BaseModel):
     data: list[dict]
     chart: dict
     row_count: int
+
+
+class CfbAnalystRequest(BaseModel):
+    question: str
+    power4_only: bool = True
