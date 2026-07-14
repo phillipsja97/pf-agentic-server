@@ -49,7 +49,7 @@ def test_build_connection_registers_tables(monkeypatch):
 
     with patch("workflows.soccer.analyst.DeltaTable", return_value=mock_dt):
         from workflows.soccer.analyst import _build_connection
-        con = _build_connection()
+        con = _build_connection(league=None)
 
     tables = con.execute("SHOW TABLES").fetchdf()["name"].tolist()
     assert "fixtures" in tables
@@ -62,12 +62,12 @@ from workflows.soccer.analyst import _build_prompt, _call_llm_sync
 
 
 def test_build_prompt_contains_question():
-    prompt = _build_prompt("who scored the most goals?")
+    prompt = _build_prompt("who scored the most goals?", league=None)
     assert "who scored the most goals?" in prompt
 
 
 def test_build_prompt_contains_all_table_names():
-    prompt = _build_prompt("test")
+    prompt = _build_prompt("test", league=None)
     assert "fixtures" in prompt
     assert "player_match" in prompt
     assert "player_season" in prompt
@@ -75,7 +75,7 @@ def test_build_prompt_contains_all_table_names():
 
 
 def test_build_prompt_mentions_season_type():
-    prompt = _build_prompt("test")
+    prompt = _build_prompt("test", league=None)
     assert "2024" in prompt
 
 
