@@ -5,6 +5,7 @@ from core.auth import get_current_user
 from core.logging import logger
 from core.storage.jobs import create_job, get_job, list_jobs
 from schemas.models import (
+    CfbAnalystRequest,
     CodingRequest,
     JobCreatedResponse,
     JobStatusResponse,
@@ -16,6 +17,7 @@ from schemas.models import (
     SoccerAnalystResponse,
 )
 from workflows.soccer.analyst import run_soccer_analyst, SoccerAnalystError
+from workflows.cfb.analyst import run_cfb_analyst, CfbAnalystError
 
 router = APIRouter(tags=["workflows"])
 
@@ -135,6 +137,16 @@ async def soccer_analyst(request: SoccerAnalystRequest) -> SoccerAnalystResponse
     try:
         return await run_soccer_analyst(request)
     except SoccerAnalystError as e:
+        return JSONResponse(status_code=422, content={"error": str(e), "sql": e.sql})
+    except Exception as e:
+        return JSONResponse(status_code=422, content={"error": str(e)})
+
+
+@router.post("/cfb-analyst", response_model=SoccerAnalystResponse)
+async def cfb_analyst(request: CfbAnalystRequest) -> SoccerAnalystResponse:
+    try:
+        return await run_cfb_analyst(request)
+    except CfbAnalystError as e:
         return JSONResponse(status_code=422, content={"error": str(e), "sql": e.sql})
     except Exception as e:
         return JSONResponse(status_code=422, content={"error": str(e)})
