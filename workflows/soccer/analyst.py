@@ -48,6 +48,36 @@ _TABLE_SCHEMAS = {
     ),
 }
 
+_COMPARISON_SQL = """\
+WITH base AS (
+    SELECT player, season,
+        goals       * 90.0 / NULLIF(minutes, 0) AS goals_p90,
+        assists     * 90.0 / NULLIF(minutes, 0) AS assists_p90,
+        xg          * 90.0 / NULLIF(minutes, 0) AS xg_p90,
+        xa          * 90.0 / NULLIF(minutes, 0) AS xa_p90,
+        key_passes  * 90.0 / NULLIF(minutes, 0) AS key_passes_p90,
+        shots       * 90.0 / NULLIF(minutes, 0) AS shots_p90
+    FROM player_season
+    WHERE minutes > 0
+),
+ranked AS (
+    SELECT player, season,
+        ROUND(PERCENT_RANK() OVER (ORDER BY goals_p90)       * 100) AS goals_p90,
+        ROUND(PERCENT_RANK() OVER (ORDER BY assists_p90)     * 100) AS assists_p90,
+        ROUND(PERCENT_RANK() OVER (ORDER BY xg_p90)          * 100) AS xg_p90,
+        ROUND(PERCENT_RANK() OVER (ORDER BY xa_p90)          * 100) AS xa_p90,
+        ROUND(PERCENT_RANK() OVER (ORDER BY key_passes_p90)  * 100) AS key_passes_p90,
+        ROUND(PERCENT_RANK() OVER (ORDER BY shots_p90)       * 100) AS shots_p90
+    FROM base
+)
+SELECT * FROM ranked
+WHERE (player ILIKE ? AND season = ?)
+   OR (player ILIKE ? AND season = ?)
+"""
+
+_RADAR_AXES = ["Goals/90", "Assists/90", "xG/90", "xA/90", "Key Passes/90", "Shots/90"]
+_RADAR_COLS = ["goals_p90", "assists_p90", "xg_p90", "xa_p90", "key_passes_p90", "shots_p90"]
+
 # Per-league connection cache
 _cons: dict[str, duckdb.DuckDBPyConnection] = {}
 _con_locks: dict[str, asyncio.Lock] = {}
@@ -217,12 +247,54 @@ def _build_plotly_figure(df: pl.DataFrame, plan: SoccerQueryPlan) -> dict:
     }
 
 
+def _build_comparison(
+    con: duckdb.DuckDBPyConnection,
+    plan: ComparisonQueryPlan,
+) -> tuple[str, list[dict], dict]:
+    params = [plan.player_a, plan.season_a, plan.player_b, plan.season_b]
+    try:
+        df = con.execute(_COMPARISON_SQL, params).pl()
+    except Exception as e:
+        raise SoccerAnalystError(str(e), _COMPARISON_SQL)
+
+    if len(df) == 0:
+        raise SoccerAnalystError(
+            "No data found for one or both players", _COMPARISON_SQL
+        )
+    if len(df) < 2:
+        raise SoccerAnalystError(
+            "Could not find data for both players in the specified seasons",
+            _COMPARISON_SQL,
+        )
+
+    series = [
+        {
+            "name": row["player"],
+            "values": [int(row.get(col) or 0) for col in _RADAR_COLS],
+        }
+        for row in df.to_dicts()
+    ]
+    radar_figure = {"title": plan.title, "axes": _RADAR_AXES, "series": series}
+    return _COMPARISON_SQL, df.to_dicts(), radar_figure
+
+
 async def run_soccer_analyst(request: SoccerAnalystRequest) -> SoccerAnalystResponse:
     client = await _get_client()
     con = await _get_con(request.league)
     prompt = _build_prompt(request.question, request.league)
 
     plan = await asyncio.to_thread(_call_llm_sync, client, prompt)
+
+    if isinstance(plan, ComparisonQueryPlan):
+        sql, data, comparison = await asyncio.to_thread(_build_comparison, con, plan)
+        return SoccerAnalystResponse(
+            question=request.question,
+            sql=sql,
+            data=data,
+            chart={"data": [], "layout": {}},
+            row_count=len(data),
+            comparison=comparison,
+        )
 
     try:
         df = await asyncio.to_thread(_execute_sql, con, plan.sql)

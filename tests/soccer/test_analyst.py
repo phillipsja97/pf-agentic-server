@@ -212,3 +212,77 @@ def test_build_prompt_includes_is_comparison_instruction():
     from workflows.soccer.analyst import _build_prompt
     prompt = _build_prompt("compare kante and caicedo", league=None)
     assert "is_comparison" in prompt
+
+
+def _make_comparison_con() -> duckdb.DuckDBPyConnection:
+    con = duckdb.connect()
+    con.execute("""
+        CREATE TABLE player_season (
+            player TEXT, team TEXT, position TEXT,
+            matches INT, minutes INT,
+            goals INT, xg FLOAT, np_goals INT, np_xg FLOAT,
+            assists INT, xa FLOAT,
+            shots INT, key_passes INT,
+            yellow_cards INT, red_cards INT,
+            season INT, league TEXT
+        )
+    """)
+    con.execute("""
+        INSERT INTO player_season VALUES
+            ('Kante',       'Chelsea',  'MF', 30, 2700, 3,  0.5, 3,  0.4, 7,  1.0, 45, 90, 1, 0, 1617, 'ENG-Premier League'),
+            ('Caicedo',     'Brighton', 'MF', 32, 2880, 5,  0.8, 5,  0.7, 4,  0.6, 35, 60, 3, 0, 2425, 'ENG-Premier League'),
+            ('OtherPlayer', 'Arsenal',  'FW', 28, 2520, 15, 2.1, 12, 1.8, 8,  1.2, 20, 40, 2, 0, 1617, 'ENG-Premier League')
+    """)
+    return con
+
+
+def test_build_comparison_returns_radar_figure():
+    from workflows.soccer.analyst import _build_comparison
+    from schemas.models import ComparisonQueryPlan
+    con = _make_comparison_con()
+    plan = ComparisonQueryPlan(
+        is_comparison=True,
+        player_a="Kante",
+        season_a=1617,
+        player_b="Caicedo",
+        season_b=2425,
+        title="Kante vs Caicedo",
+    )
+    sql, data, radar = _build_comparison(con, plan)
+    assert radar["title"] == "Kante vs Caicedo"
+    assert len(radar["axes"]) == 6
+    assert len(radar["series"]) == 2
+    assert all(len(s["values"]) == 6 for s in radar["series"])
+    assert all(0 <= v <= 100 for s in radar["series"] for v in s["values"])
+
+
+def test_build_comparison_raises_if_both_players_not_found():
+    from workflows.soccer.analyst import _build_comparison, SoccerAnalystError
+    from schemas.models import ComparisonQueryPlan
+    con = _make_comparison_con()
+    plan = ComparisonQueryPlan(
+        is_comparison=True,
+        player_a="Nobody",
+        season_a=1617,
+        player_b="AlsoNobody",
+        season_b=2425,
+        title="Test",
+    )
+    with pytest.raises(SoccerAnalystError):
+        _build_comparison(con, plan)
+
+
+def test_build_comparison_raises_if_only_one_player_found():
+    from workflows.soccer.analyst import _build_comparison, SoccerAnalystError
+    from schemas.models import ComparisonQueryPlan
+    con = _make_comparison_con()
+    plan = ComparisonQueryPlan(
+        is_comparison=True,
+        player_a="Kante",
+        season_a=1617,
+        player_b="Nobody",
+        season_b=2425,
+        title="Test",
+    )
+    with pytest.raises(SoccerAnalystError):
+        _build_comparison(con, plan)
