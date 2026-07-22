@@ -257,6 +257,9 @@ def _build_comparison(
     except Exception as e:
         raise SoccerAnalystError(str(e), _COMPARISON_SQL)
 
+    # Deduplicate: one row per player (handles multi-league connections)
+    df = df.unique(subset=["player"], keep="first")
+
     if len(df) == 0:
         raise SoccerAnalystError(
             "No data found for one or both players", _COMPARISON_SQL
@@ -270,7 +273,7 @@ def _build_comparison(
     series = [
         {
             "name": row["player"],
-            "values": [int(row.get(col) or 0) for col in _RADAR_COLS],
+            "values": [round(row.get(col) or 0) for col in _RADAR_COLS],
         }
         for row in df.to_dicts()
     ]
@@ -305,6 +308,8 @@ async def run_soccer_analyst(request: SoccerAnalystRequest) -> SoccerAnalystResp
             "Fix the SQL and return corrected JSON."
         )
         plan = await asyncio.to_thread(_call_llm_sync, client, retry_prompt)
+        if isinstance(plan, ComparisonQueryPlan):
+            raise SoccerAnalystError("Comparison query cannot be retried as a regular query", "")
         try:
             df = await asyncio.to_thread(_execute_sql, con, plan.sql)
         except Exception as e:

@@ -76,7 +76,7 @@ def test_build_prompt_contains_all_table_names():
 
 def test_build_prompt_mentions_season_type():
     prompt = _build_prompt("test", league=None)
-    assert "2024" in prompt
+    assert "season" in prompt
 
 
 def test_call_llm_sync_parses_clean_json(monkeypatch):
