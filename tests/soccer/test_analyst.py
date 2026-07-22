@@ -187,3 +187,28 @@ def test_soccer_analyst_response_accepts_comparison_field():
         comparison={"title": "A vs B", "axes": ["Goals/90"], "series": []},
     )
     assert resp_with_comparison.comparison["title"] == "A vs B"
+
+
+def test_parse_plan_returns_regular_plan():
+    from workflows.soccer.analyst import _parse_plan
+    raw = '{"is_comparison": false, "sql": "SELECT 1", "chart_type": "bar", "x_column": "a", "y_column": "b", "title": "T"}'
+    from schemas.models import SoccerQueryPlan
+    plan = _parse_plan(raw)
+    assert isinstance(plan, SoccerQueryPlan)
+    assert plan.sql == "SELECT 1"
+
+
+def test_parse_plan_returns_comparison_plan():
+    from workflows.soccer.analyst import _parse_plan
+    raw = '{"is_comparison": true, "player_a": "Kante", "season_a": 1617, "player_b": "Caicedo", "season_b": 2425, "title": "K vs C"}'
+    from schemas.models import ComparisonQueryPlan
+    plan = _parse_plan(raw)
+    assert isinstance(plan, ComparisonQueryPlan)
+    assert plan.player_a == "Kante"
+    assert plan.season_a == 1617
+
+
+def test_build_prompt_includes_is_comparison_instruction():
+    from workflows.soccer.analyst import _build_prompt
+    prompt = _build_prompt("compare kante and caicedo", league=None)
+    assert "is_comparison" in prompt
