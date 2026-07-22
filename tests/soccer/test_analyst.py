@@ -158,3 +158,32 @@ def test_build_plotly_figure_missing_column_returns_nones():
     )
     fig = _build_plotly_figure(df, plan)
     assert fig["data"][0]["y"] == [None]
+
+
+def test_comparison_query_plan_parses():
+    from schemas.models import ComparisonQueryPlan
+    plan = ComparisonQueryPlan(
+        is_comparison=True,
+        player_a="N'Golo Kante",
+        season_a=1617,
+        player_b="Moises Caicedo",
+        season_b=2425,
+        title="Kante 2016-17 vs Caicedo 2024-25",
+    )
+    assert plan.player_a == "N'Golo Kante"
+    assert plan.season_a == 1617
+    assert plan.is_comparison is True
+
+
+def test_soccer_analyst_response_accepts_comparison_field():
+    from schemas.models import SoccerAnalystResponse
+    resp_no_comparison = SoccerAnalystResponse(
+        question="test", sql="SELECT 1", data=[], chart={}, row_count=0
+    )
+    assert resp_no_comparison.comparison is None
+
+    resp_with_comparison = SoccerAnalystResponse(
+        question="test", sql="SELECT 1", data=[], chart={}, row_count=0,
+        comparison={"title": "A vs B", "axes": ["Goals/90"], "series": []},
+    )
+    assert resp_with_comparison.comparison["title"] == "A vs B"

@@ -197,6 +197,15 @@ class SoccerQueryPlan(BaseModel):
     title: str
 
 
+class ComparisonQueryPlan(BaseModel):
+    is_comparison: Literal[True]
+    player_a: str
+    season_a: int
+    player_b: str
+    season_b: int
+    title: str
+
+
 class SoccerAnalystRequest(BaseModel):
     question: str
     league: Optional[str] = None
@@ -208,6 +217,7 @@ class SoccerAnalystResponse(BaseModel):
     data: list[dict]
     chart: dict
     row_count: int
+    comparison: Optional[dict] = None
 
 
 class CfbAnalystRequest(BaseModel):
