@@ -6,6 +6,10 @@ from core.logging import logger
 from core.storage.jobs import create_job, get_job, list_jobs
 from schemas.models import (
     CfbAnalystRequest,
+    CfbMatchupRequest,
+    CfbMatchupResponse,
+    CfbSlateResponse,
+    CfbTeam,
     CodingRequest,
     JobCreatedResponse,
     JobStatusResponse,
@@ -18,6 +22,12 @@ from schemas.models import (
 )
 from workflows.soccer.analyst import run_soccer_analyst, SoccerAnalystError
 from workflows.cfb.analyst import run_cfb_analyst, CfbAnalystError
+from workflows.cfb.matchup import (
+    run_matchup as run_cfb_matchup,
+    run_slate as run_cfb_slate,
+    list_teams as list_cfb_teams,
+    CfbMatchupError,
+)
 
 router = APIRouter(tags=["workflows"])
 
@@ -150,6 +160,29 @@ async def cfb_analyst(request: CfbAnalystRequest) -> SoccerAnalystResponse:
         return JSONResponse(status_code=422, content={"error": str(e), "sql": e.sql})
     except Exception as e:
         return JSONResponse(status_code=422, content={"error": str(e)})
+
+
+# Nested under /cfb/ so the GET routes are not captured by GET /{job_id}
+# (a path parameter never matches across a "/").
+@router.post("/cfb/matchup", response_model=CfbMatchupResponse)
+async def cfb_matchup(request: CfbMatchupRequest):
+    try:
+        return await run_cfb_matchup(request)
+    except CfbMatchupError as e:
+        return JSONResponse(status_code=422, content={"error": str(e), "suggestions": e.suggestions})
+
+
+@router.get("/cfb/slate", response_model=CfbSlateResponse)
+async def cfb_slate(week: int | None = None):
+    try:
+        return await run_cfb_slate(week)
+    except CfbMatchupError as e:
+        return JSONResponse(status_code=422, content={"error": str(e), "suggestions": e.suggestions})
+
+
+@router.get("/cfb/teams", response_model=list[CfbTeam])
+async def cfb_teams():
+    return await list_cfb_teams()
 
 
 @router.get("/", response_model=list[JobStatusResponse])
