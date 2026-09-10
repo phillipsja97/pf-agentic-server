@@ -20,7 +20,9 @@ uv sync --extra langgraph
 uv add <package>
 ```
 
-No test suite is configured yet. `httpx` is available as a dev dependency for writing integration tests against the running server.
+`uv run pytest` runs the suite under `tests/`, organised by package (`tests/cfb/`, `tests/soccer/`, `tests/routers/`, `tests/core/`). Route tests use `fastapi.testclient.TestClient(app)` and patch `routers.workflows.run_<name>` with `AsyncMock`.
+
+`tests/routers/test_briefing_config.py::test_trigger_briefing_creates_job` is a known pre-existing failure unrelated to the sports workflows.
 
 ## Architecture
 
@@ -39,13 +41,39 @@ This is a **fire-and-forget async job server**. The pattern is consistent across
 - **`core/tracing.py`** — wraps Langfuse. Provides `@observe` decorator that no-ops gracefully when `LANGFUSE_*` keys are absent.
 - **`schemas/models.py`** — all Pydantic request/response models.
 - **`routers/workflows.py`** — registers workflow endpoints; imports workflow runner lazily inside the route handler to avoid loading the model at startup.
-- **`workflows/effgen/research.py`** — the only implemented workflow. Loads a local GGUF model (lazy singleton, thread-safe lock), runs it via `effgen.create_agent`, and writes results to both the jobs table and an Obsidian note.
+- **`workflows/effgen/research.py`** — loads a local GGUF model (lazy singleton, thread-safe lock), runs it via `effgen.create_agent`, and writes results to both the jobs table and an Obsidian note.
+
+### Sports workflows (the exception to the job pattern)
+
+These respond **synchronously** rather than creating a job, and read Delta
+tables that `sports-etl` writes to MinIO. This server never calls the
+CollegeFootballData API — it has no `cfbd` dependency and no API key.
+
+| Route | Shape |
+|---|---|
+| `POST /workflows/soccer-analyst` | LLM → SQL → DuckDB; returns rows + a Plotly figure, or a `comparison` RadarFigure for player-comparison questions |
+| `POST /workflows/cfb-analyst` | same, for college football |
+| `POST /workflows/cfb/matchup` | **no LLM** — linear model over stored coefficients |
+| `GET /workflows/cfb/slate` | this week's games, each predicted |
+| `GET /workflows/cfb/teams` | team list for pickers |
+
+The two analysts load whole Delta tables into memory as PyArrow at first
+request and register them with DuckDB, so generated SQL uses plain table names,
+not `delta_scan()`. They cache forever.
+
+`workflows/cfb/matchup.py` is different: it reads `cfb_team_profile`,
+`cfb_model` and `cfb_games` into a **30-minute TTL** cache, because the weekly
+ETL refresh must become visible without a server restart. Every response stamps
+`data_through_date` so a stale answer is visible rather than silent. Prediction
+is one linear formula per head applied to floats stored in `cfb_model` — no
+scikit-learn here; the model is fitted in `sports-etl`.
 
 ### Adding a new workflow
 
 1. Create `workflows/<engine>/<name>.py` with an `async def run_<name>(job_id, request)` function that calls `update_job` to manage status.
 2. Add request/response schemas to `schemas/models.py`.
 3. Register a route in `routers/workflows.py` following the existing `POST /research` pattern.
+4. Read-only endpoints must be nested under a prefix (e.g. `/cfb/teams`) — `GET /workflows/{job_id}` captures any single-segment GET path, so `GET /workflows/slate` would be treated as a job-id lookup. A path parameter never matches across a `/`, so nesting is immune regardless of declaration order.
 
 ### LLM / model
 
