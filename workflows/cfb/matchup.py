@@ -130,3 +130,190 @@ def latest_through_week(profile: pl.DataFrame, season: int) -> int:
     if weeks.is_empty():
         raise CfbMatchupError(f"No profile data for season {season}")
     return int(weeks.max())
+
+
+@dataclass
+class Store:
+    profile: pl.DataFrame
+    games: pl.DataFrame
+    model_row: dict
+    loaded_at: float
+
+
+_store: Optional[Store] = None
+_store_lock = asyncio.Lock()
+
+_PATHS = {"profile": "cfb/team_profile", "games": "cfb/games", "model": "cfb/model"}
+
+
+def _storage_options() -> dict:
+    return {
+        "endpoint_url": settings.minio_endpoint,
+        "aws_access_key_id": settings.minio_access_key,
+        "aws_secret_access_key": settings.minio_secret_key,
+        "allow_http": "true",
+        "aws_virtual_hosted_style_request": "false",
+    }
+
+
+def _read(key: str) -> pl.DataFrame:
+    path = f"s3://{settings.minio_bucket}/{_PATHS[key]}/"
+    dt = DeltaTable(path, storage_options=_storage_options())
+    return pl.from_arrow(dt.to_pyarrow_table())
+
+
+def _load_store() -> Store:
+    profile = _read("profile")
+    games = _read("games")
+    model = _read("model").sort("fitted_at", descending=True)
+    if model.is_empty():
+        raise CfbMatchupError("cfb_model is empty — run pipeline_cfb_model.py")
+    logger.info(f"cfb matchup: loaded profile={len(profile)} games={len(games)} model rows={len(model)}")
+    return Store(profile=profile, games=games, model_row=model.row(0, named=True),
+                 loaded_at=time.monotonic())
+
+
+async def _get_store() -> Store:
+    global _store
+    if _store is not None and time.monotonic() - _store.loaded_at < CACHE_TTL_SECONDS:
+        return _store
+    async with _store_lock:
+        if _store is None or time.monotonic() - _store.loaded_at >= CACHE_TTL_SECONDS:
+            _store = await asyncio.to_thread(_load_store)
+    return _store
+
+
+def model_record(model_row: dict) -> CfbModelRecord:
+    bins_raw = model_row.get("calibration_bins") or "[]"
+    bins = json.loads(bins_raw) if isinstance(bins_raw, str) else bins_raw
+    return CfbModelRecord(
+        accuracy=model_row["accuracy"], brier=model_row["brier"], log_loss=model_row["log_loss"],
+        elo_baseline_accuracy=model_row["elo_accuracy"], elo_baseline_brier=model_row["elo_brier"],
+        calibration_bins=[CfbCalibrationBin(**b) for b in bins],
+        trained_through_season=int(model_row["trained_through_season"]),
+        shrink_k=int(model_row["shrink_k"]),
+    )
+
+
+def _current_season(profile: pl.DataFrame) -> int:
+    return int(profile["season"].max())
+
+
+def _profile_row(profile: pl.DataFrame, season: int, through_week: int, team: str) -> dict:
+    hit = profile.filter(
+        (pl.col("season") == season) & (pl.col("through_week") == through_week) & (pl.col("team") == team)
+    )
+    if hit.is_empty():
+        names = profile.filter(pl.col("season") == season)["team"].unique().to_list()
+        raise CfbMatchupError(f"Unknown team {team!r} for {season}",
+                              suggestions=suggest_teams(team, names))
+    return hit.row(0, named=True)
+
+
+def _team_record(row: dict) -> CfbTeamRecord:
+    return CfbTeamRecord(team=row["team"], conference=row.get("conference"),
+                         wins=int(row.get("wins") or 0), losses=int(row.get("losses") or 0),
+                         games_played=int(row.get("games") or 0))
+
+
+def _data_through_date(games: pl.DataFrame, season: int, through_week: int) -> Optional[str]:
+    played = games.filter(
+        (pl.col("season") == season) & (pl.col("season_type") == "regular")
+        & (pl.col("week") <= through_week) & pl.col("completed") & pl.col("start_date").is_not_null()
+    )
+    if played.is_empty():
+        return None
+    return str(played["start_date"].max())[:10]
+
+
+def _head_to_head(games: pl.DataFrame, a: str, b: str, limit: int = 10) -> list[CfbH2HGame]:
+    pair = games.filter(
+        pl.col("completed") & pl.col("home_points").is_not_null()
+        & (((pl.col("home_team") == a) & (pl.col("away_team") == b))
+           | ((pl.col("home_team") == b) & (pl.col("away_team") == a)))
+    ).sort("start_date", descending=True, nulls_last=True).head(limit)
+    return [
+        CfbH2HGame(season=int(r["season"]), week=int(r["week"]), season_type=r["season_type"],
+                   date=str(r["start_date"])[:10] if r["start_date"] is not None else None,
+                   home_team=r["home_team"], away_team=r["away_team"],
+                   home_points=int(r["home_points"]), away_points=int(r["away_points"]))
+        for r in pair.to_dicts()
+    ]
+
+
+async def run_matchup(req: CfbMatchupRequest) -> CfbMatchupResponse:
+    store = await _get_store()
+    season = req.season or _current_season(store.profile)
+    through_week = (req.through_week if req.through_week is not None
+                    else latest_through_week(store.profile, season))
+    home = _profile_row(store.profile, season, through_week, req.home_team)
+    away = _profile_row(store.profile, season, through_week, req.away_team)
+    home_field = 0.0 if req.neutral_site else 1.0
+    prediction = predict(
+        store.model_row,
+        float(home["elo"]) - float(away["elo"]),
+        float(home["adj_margin"]) - float(away["adj_margin"]),
+        home_field,
+    )
+    return CfbMatchupResponse(
+        season=season, through_week=through_week,
+        data_through_date=_data_through_date(store.games, season, through_week),
+        neutral_site=req.neutral_site,
+        home=_team_record(home), away=_team_record(away),
+        prediction=prediction,
+        model=model_record(store.model_row),
+        comparison=build_radar(
+            home, away, f"{home['team']} vs {away['team']} — {season} through week {through_week}"
+        ),
+        edges=build_edges(home, away),
+        head_to_head=_head_to_head(store.games, home["team"], away["team"]),
+    )
+
+
+async def run_slate(week: Optional[int]) -> CfbSlateResponse:
+    store = await _get_store()
+    season = _current_season(store.profile)
+    through_week = latest_through_week(store.profile, season)
+    target_week = week if week is not None else through_week + 1
+    games = store.games.filter(
+        (pl.col("season") == season) & (pl.col("season_type") == "regular")
+        & (pl.col("week") == target_week)
+        & (pl.col("home_classification") == "fbs") & (pl.col("away_classification") == "fbs")
+    ).sort("start_date", nulls_last=True)
+    out = []
+    for g in games.to_dicts():
+        try:
+            home = _profile_row(store.profile, season, through_week, g["home_team"])
+            away = _profile_row(store.profile, season, through_week, g["away_team"])
+        except CfbMatchupError:
+            # A team with no profile row (rare) is skipped rather than failing the slate.
+            continue
+        elo_diff = float(g["home_pregame_elo"] or home["elo"]) - float(g["away_pregame_elo"] or away["elo"])
+        p = predict(store.model_row, elo_diff,
+                    float(home["adj_margin"]) - float(away["adj_margin"]),
+                    0.0 if g["neutral_site"] else 1.0)
+        out.append(CfbSlateGame(
+            game_id=int(g["id"]), week=int(g["week"]),
+            start_date=str(g["start_date"])[:10] if g["start_date"] is not None else None,
+            home_team=g["home_team"], away_team=g["away_team"], neutral_site=bool(g["neutral_site"]),
+            home_win_prob=p.home_win_prob,
+            projected_home_points=p.projected_home_points,
+            projected_away_points=p.projected_away_points,
+        ))
+    return CfbSlateResponse(
+        season=season, week=target_week, through_week=through_week,
+        data_through_date=_data_through_date(store.games, season, through_week),
+        games=out,
+    )
+
+
+async def list_teams() -> list[CfbTeam]:
+    store = await _get_store()
+    season = _current_season(store.profile)
+    through_week = latest_through_week(store.profile, season)
+    rows = (
+        store.profile
+        .filter((pl.col("season") == season) & (pl.col("through_week") == through_week))
+        .select("team", "conference").unique().sort("team")
+    )
+    return [CfbTeam(team=r["team"], conference=r["conference"]) for r in rows.to_dicts()]
