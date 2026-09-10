@@ -16,6 +16,13 @@ POWER4 = ["SEC", "Big Ten", "ACC", "Big 12"]
 _CONFERENCE_TABLES = {"cfb_team_season_stats", "cfb_player_season", "cfb_team_game_stats"}
 _TABLE_NAMES = ["cfb_games", "cfb_team_season_stats", "cfb_player_season", "cfb_team_game_stats"]
 
+_S3_PATHS = {
+    "cfb_games":             "cfb/games",
+    "cfb_team_season_stats": "cfb/team_season_stats",
+    "cfb_player_season":     "cfb/player_season",
+    "cfb_team_game_stats":   "cfb/team_game_stats",
+}
+
 _TABLE_SCHEMAS = {
     "cfb_games": (
         "id (INT), season (INT), week (INT), start_date (DATE), "
@@ -27,10 +34,12 @@ _TABLE_SCHEMAS = {
         "-- NARROW format: one row per stat per team. Use WHERE stat_name = '...' to isolate a stat."
     ),
     "cfb_player_season": (
-        "season (INT), player (TEXT), team (TEXT), conference (TEXT), "
-        "stat_category (TEXT), stat_type (TEXT), stat (FLOAT), year (INT) "
+        "season (INT), player (TEXT), position (TEXT), team (TEXT), conference (TEXT), "
+        "category (TEXT), stat_type (TEXT), stat (FLOAT), year (INT) "
         "-- NARROW format: one row per stat per player. "
-        "Use WHERE stat_category = '...' AND stat_type = '...' to isolate a stat."
+        "category values (lowercase): rushing, passing, receiving, defensive, kicking, punting, kickReturns, puntReturns, interceptions, fumbles. "
+        "stat_type values are abbreviations, e.g. rushing: YDS, CAR, TD, YPC, LONG; passing: YDS, TD, INT, ATT, COMP; receiving: YDS, REC, TD, LONG. "
+        "Use WHERE category = '...' AND stat_type = '...' to isolate a stat."
     ),
     "cfb_team_game_stats": (
         "game_id (INT), school (TEXT), conference (TEXT), home_away (TEXT), points (INT), year (INT)"
@@ -59,7 +68,7 @@ def _build_connection(power4_only: bool) -> duckdb.DuckDBPyConnection:
 
     con = duckdb.connect()
     for table_name in _TABLE_NAMES:
-        path = f"s3://{settings.minio_bucket}/cfb/{table_name}/"
+        path = f"s3://{settings.minio_bucket}/{_S3_PATHS[table_name]}/"
         dt = DeltaTable(path, storage_options=storage_options)
 
         if power4_only and table_name in _CONFERENCE_TABLES:
@@ -94,8 +103,9 @@ _SYSTEM_PROMPT = (
     "You are a college football data analyst. You write DuckDB SQL queries. "
     "Tables are already loaded in memory — use plain table names, not delta_scan(). "
     "Stat tables (cfb_team_season_stats, cfb_player_season) are in narrow/tall format — "
-    "use WHERE clauses on stat_name, stat_category, or stat_type to isolate a specific stat. "
-    "Season is a plain 4-digit year integer (e.g. 2024). "
+    "use WHERE clauses on category or stat_type to isolate a specific stat. "
+    "Season is a plain 4-digit year integer. Available seasons: 2015 through 2024. "
+    "If the user asks about a season outside this range, use the closest available season. "
     "Return only valid JSON with no explanation or markdown."
 )
 
@@ -133,7 +143,7 @@ def _build_prompt(question: str, power4_only: bool) -> str:
 
     return (
         f"Answer this question about {scope} college football data: {question}\n\n"
-        f"{scope_note}\n\n"
+        f"{scope_note} Available seasons: 2015–2024 only. If the question names a season outside this range, use the closest one.\n\n"
         f"Available tables:\n{schema_str}\n\n"
         "Return JSON with exactly these fields:\n"
         '- sql: DuckDB SQL using plain table names\n'
