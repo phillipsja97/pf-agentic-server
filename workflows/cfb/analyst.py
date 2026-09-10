@@ -104,7 +104,7 @@ _SYSTEM_PROMPT = (
     "Tables are already loaded in memory — use plain table names, not delta_scan(). "
     "Stat tables (cfb_team_season_stats, cfb_player_season) are in narrow/tall format — "
     "use WHERE clauses on category or stat_type to isolate a specific stat. "
-    "Season is a plain 4-digit year integer. Available seasons: 2015 through 2024. "
+    "Season is a plain 4-digit year integer. Available seasons: 2015 through 2026. "
     "If the user asks about a season outside this range, use the closest available season. "
     "Return only valid JSON with no explanation or markdown."
 )
@@ -143,7 +143,8 @@ def _build_prompt(question: str, power4_only: bool) -> str:
 
     return (
         f"Answer this question about {scope} college football data: {question}\n\n"
-        f"{scope_note} Available seasons: 2015–2024 only. If the question names a season outside this range, use the closest one.\n\n"
+        f"{scope_note} Available seasons: 2015–2026 only (2026 is in progress — one week played). "
+        "If the question names a season outside this range, use the closest one.\n\n"
         f"Available tables:\n{schema_str}\n\n"
         "Return JSON with exactly these fields:\n"
         '- sql: DuckDB SQL using plain table names\n'

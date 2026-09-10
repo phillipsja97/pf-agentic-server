@@ -223,3 +223,107 @@ class SoccerAnalystResponse(BaseModel):
 class CfbAnalystRequest(BaseModel):
     question: str
     power4_only: bool = True
+
+
+# --- cfb matchup predictor models ---
+
+class CfbMatchupRequest(BaseModel):
+    home_team: str
+    away_team: str
+    neutral_site: bool = False
+    season: Optional[int] = None        # default: latest season in cfb_team_profile
+    through_week: Optional[int] = None  # default: latest fetched week of that season
+
+
+class CfbTeamRecord(BaseModel):
+    team: str
+    conference: Optional[str] = None
+    wins: int
+    losses: int
+    games_played: int
+
+
+class CfbPrediction(BaseModel):
+    home_win_prob: float
+    away_win_prob: float
+    projected_home_points: float
+    projected_away_points: float
+    expected_margin: float
+
+
+class CfbCalibrationBin(BaseModel):
+    lo: float
+    hi: float
+    n: int
+    predicted: Optional[float] = None
+    actual: Optional[float] = None
+
+
+class CfbModelRecord(BaseModel):
+    accuracy: float
+    brier: float
+    log_loss: float
+    elo_baseline_accuracy: float
+    elo_baseline_brier: float
+    calibration_bins: list[CfbCalibrationBin]
+    trained_through_season: int
+    shrink_k: int
+
+
+class CfbEdge(BaseModel):
+    stat: str
+    home_value: Optional[float]
+    away_value: Optional[float]
+    diff: Optional[float]           # home - away, in the stat's own unit
+    favors: Literal["home", "away", "even"]
+    unit: str
+
+
+class CfbH2HGame(BaseModel):
+    season: int
+    week: int
+    season_type: str
+    date: Optional[str] = None
+    home_team: str
+    away_team: str
+    home_points: int
+    away_points: int
+
+
+class CfbMatchupResponse(BaseModel):
+    season: int
+    through_week: int
+    data_through_date: Optional[str]
+    neutral_site: bool
+    home: CfbTeamRecord
+    away: CfbTeamRecord
+    prediction: CfbPrediction
+    model: CfbModelRecord
+    comparison: dict                # RadarFigure: {title, axes, series[{name, values}]}
+    edges: list[CfbEdge]
+    head_to_head: list[CfbH2HGame]
+
+
+class CfbSlateGame(BaseModel):
+    game_id: int
+    week: int
+    start_date: Optional[str] = None
+    home_team: str
+    away_team: str
+    neutral_site: bool
+    home_win_prob: float
+    projected_home_points: float
+    projected_away_points: float
+
+
+class CfbSlateResponse(BaseModel):
+    season: int
+    week: int
+    through_week: int
+    data_through_date: Optional[str]
+    games: list[CfbSlateGame]
+
+
+class CfbTeam(BaseModel):
+    team: str
+    conference: Optional[str] = None
