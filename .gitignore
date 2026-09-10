@@ -9,3 +9,5 @@ models/
 *.gguf
 .pytest_cache/
 brain/
+.claude/worktrees/
+.superpowers/
