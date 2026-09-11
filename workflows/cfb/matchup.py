@@ -54,19 +54,27 @@ class CfbMatchupError(Exception):
         self.suggestions = suggestions or []
 
 
-def _linear(model_row: dict, head: str, elo_diff: float, adj_diff: float, home_field: float) -> float:
-    return (
-        model_row[f"{head}_intercept"]
-        + model_row[f"{head}_b_elo"] * elo_diff
-        + model_row[f"{head}_b_adj"] * adj_diff
-        + model_row[f"{head}_b_home"] * home_field
-    )
+# Feature order must match sports-etl model/cfb_model.py FEATURES; the stored
+# coefficient columns are named from it.
+FEATURES = ("elo_diff", "adj_diff", "eff_diff", "home_field")
 
 
-def predict(model_row: dict, elo_diff: float, adj_diff: float, home_field: float) -> CfbPrediction:
-    p_home = 1.0 / (1.0 + math.exp(-_linear(model_row, "win", elo_diff, adj_diff, home_field)))
-    margin = _linear(model_row, "margin", elo_diff, adj_diff, home_field)
-    total = _linear(model_row, "total", elo_diff, adj_diff, home_field)
+def _linear(model_row: dict, head: str, features: dict[str, float]) -> float:
+    total = model_row[f"{head}_intercept"]
+    for name in FEATURES:
+        # A model row fitted before a feature existed simply lacks its column;
+        # treating that as a zero coefficient keeps old rows usable.
+        total += model_row.get(f"{head}_b_{name}", 0.0) * features[name]
+    return total
+
+
+def predict(model_row: dict, elo_diff: float, adj_diff: float, home_field: float,
+            eff_diff: float = 0.0) -> CfbPrediction:
+    feats = {"elo_diff": elo_diff, "adj_diff": adj_diff,
+             "eff_diff": eff_diff, "home_field": home_field}
+    p_home = 1.0 / (1.0 + math.exp(-_linear(model_row, "win", feats)))
+    margin = _linear(model_row, "margin", feats)
+    total = _linear(model_row, "total", feats)
     return CfbPrediction(
         home_win_prob=p_home,
         away_win_prob=1.0 - p_home,
@@ -287,6 +295,7 @@ async def run_matchup(req: CfbMatchupRequest) -> CfbMatchupResponse:
         float(home["elo"]) - float(away["elo"]),
         float(home["adj_margin"]) - float(away["adj_margin"]),
         home_field,
+        eff_diff=float(home.get("net_eff") or 0.0) - float(away.get("net_eff") or 0.0),
     )
     return CfbMatchupResponse(
         season=season, through_week=through_week,
@@ -324,7 +333,8 @@ async def run_slate(week: Optional[int]) -> CfbSlateResponse:
         elo_diff = float(g["home_pregame_elo"] or home["elo"]) - float(g["away_pregame_elo"] or away["elo"])
         p = predict(store.model_row, elo_diff,
                     float(home["adj_margin"]) - float(away["adj_margin"]),
-                    0.0 if g["neutral_site"] else 1.0)
+                    0.0 if g["neutral_site"] else 1.0,
+                    eff_diff=float(home.get("net_eff") or 0.0) - float(away.get("net_eff") or 0.0))
         slate_home_color, slate_away_color = _pair_colors(store, g["home_team"], g["away_team"])
         out.append(CfbSlateGame(
             game_id=int(g["id"]), week=int(g["week"]),

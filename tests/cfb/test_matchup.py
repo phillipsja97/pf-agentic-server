@@ -8,10 +8,16 @@ from workflows.cfb.matchup import (
 
 
 MODEL_ROW = {
-    "win_intercept": 0.0, "win_b_elo": 0.01, "win_b_adj": 0.1, "win_b_home": 0.5,
-    "margin_intercept": 0.0, "margin_b_elo": 0.04, "margin_b_adj": 0.6, "margin_b_home": 2.5,
-    "total_intercept": 50.0, "total_b_elo": 0.0, "total_b_adj": 0.0, "total_b_home": 0.0,
+    "win_intercept": 0.0, "win_b_elo_diff": 0.01, "win_b_adj_diff": 0.1,
+    "win_b_eff_diff": 2.0, "win_b_home_field": 0.5,
+    "margin_intercept": 0.0, "margin_b_elo_diff": 0.04, "margin_b_adj_diff": 0.6,
+    "margin_b_eff_diff": 0.0, "margin_b_home_field": 2.5,
+    "total_intercept": 50.0, "total_b_elo_diff": 0.0, "total_b_adj_diff": 0.0,
+    "total_b_eff_diff": 0.0, "total_b_home_field": 0.0,
 }
+
+# A row persisted before eff_diff existed, to prove old models still load.
+LEGACY_MODEL_ROW = {k: v for k, v in MODEL_ROW.items() if "eff_diff" not in k}
 
 
 def _row(team, **kw):
@@ -32,6 +38,18 @@ def test_predict_applies_all_three_heads():
     assert p.expected_margin == pytest.approx(0.04 * 100 + 0.6 * 5 + 2.5)   # 9.5
     assert p.projected_home_points == pytest.approx((50 + 9.5) / 2)
     assert p.projected_away_points == pytest.approx((50 - 9.5) / 2)
+
+
+def test_predict_uses_the_efficiency_feature():
+    base = predict(MODEL_ROW, elo_diff=0.0, adj_diff=0.0, home_field=0.0)
+    better = predict(MODEL_ROW, elo_diff=0.0, adj_diff=0.0, home_field=0.0, eff_diff=0.25)
+    assert better.home_win_prob > base.home_win_prob
+
+
+def test_a_model_row_without_the_efficiency_column_still_predicts():
+    # Coefficient columns absent from an older row are treated as zero.
+    p = predict(LEGACY_MODEL_ROW, elo_diff=100.0, adj_diff=5.0, home_field=1.0, eff_diff=0.9)
+    assert p.home_win_prob == pytest.approx(1 / (1 + math.exp(-2.0)))
 
 
 def test_predict_neutral_site_has_no_home_term():
