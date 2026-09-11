@@ -241,6 +241,9 @@ class CfbTeamRecord(BaseModel):
     wins: int
     losses: int
     games_played: int
+    # Rendered brand colour, already paired against the opponent and lifted
+    # to stay legible on the dark chart background. See workflows/cfb/colors.py.
+    color: str
 
 
 class CfbPrediction(BaseModel):
@@ -314,6 +317,8 @@ class CfbSlateGame(BaseModel):
     home_win_prob: float
     projected_home_points: float
     projected_away_points: float
+    home_color: str
+    away_color: str
 
 
 class CfbSlateResponse(BaseModel):

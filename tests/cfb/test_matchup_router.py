@@ -16,7 +16,7 @@ def client():
 
 def _matchup():
     def rec(t):
-        return CfbTeamRecord(team=t, conference="SEC", wins=2, losses=0, games_played=2)
+        return CfbTeamRecord(team=t, conference="SEC", wins=2, losses=0, games_played=2, color="#ff8200")
     return CfbMatchupResponse(
         season=2026, through_week=2, data_through_date="2026-09-05", neutral_site=False,
         home=rec("Georgia"), away=rec("Alabama"),

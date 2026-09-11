@@ -1,6 +1,6 @@
 """CFB matchup predictor serving layer.
 
-Reads cfb_team_profile / cfb_model / cfb_games from MinIO (TTL-cached) and
+Reads cfb_team_profile / cfb_model / cfb_games / cfb_teams from MinIO (TTL-cached) and
 applies the stored linear coefficients. No LLM, no SQL generation.
 """
 import asyncio
@@ -8,7 +8,7 @@ import difflib
 import json
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import polars as pl
@@ -16,6 +16,7 @@ from deltalake import DeltaTable
 
 from config import settings
 from core.logging import logger
+from workflows.cfb.colors import resolve_pair
 from schemas.models import (
     CfbCalibrationBin, CfbEdge, CfbH2HGame, CfbMatchupRequest, CfbMatchupResponse,
     CfbModelRecord, CfbPrediction, CfbSlateGame, CfbSlateResponse, CfbTeam, CfbTeamRecord,
@@ -138,12 +139,16 @@ class Store:
     games: pl.DataFrame
     model_row: dict
     loaded_at: float
+    # school -> (primary, alternate). Empty if cfb_teams has not been built
+    # yet, in which case every side renders in the neutral.
+    colors: dict[str, tuple[Optional[str], Optional[str]]] = field(default_factory=dict)
 
 
 _store: Optional[Store] = None
 _store_lock = asyncio.Lock()
 
-_PATHS = {"profile": "cfb/team_profile", "games": "cfb/games", "model": "cfb/model"}
+_PATHS = {"profile": "cfb/team_profile", "games": "cfb/games", "model": "cfb/model",
+          "teams": "cfb/teams"}
 
 
 def _storage_options() -> dict:
@@ -162,15 +167,37 @@ def _read(key: str) -> pl.DataFrame:
     return pl.from_arrow(dt.to_pyarrow_table())
 
 
+def _load_colors() -> dict[str, tuple[Optional[str], Optional[str]]]:
+    """Latest season's brand colours, keyed by school.
+
+    Optional: the matchup still works without cfb_teams, just in neutral grey,
+    so a missing table must not take the endpoint down.
+    """
+    try:
+        teams = _read("teams")
+    except Exception as e:
+        logger.warning(f"cfb matchup: no team colours available ({e})")
+        return {}
+    if teams.is_empty():
+        return {}
+    latest = teams.filter(pl.col("year") == teams["year"].max())
+    return {
+        r["school"]: (r.get("color"), r.get("alternate_color"))
+        for r in latest.to_dicts()
+    }
+
+
 def _load_store() -> Store:
     profile = _read("profile")
     games = _read("games")
     model = _read("model").sort("fitted_at", descending=True)
     if model.is_empty():
         raise CfbMatchupError("cfb_model is empty — run pipeline_cfb_model.py")
-    logger.info(f"cfb matchup: loaded profile={len(profile)} games={len(games)} model rows={len(model)}")
+    colors = _load_colors()
+    logger.info(f"cfb matchup: loaded profile={len(profile)} games={len(games)} "
+                f"model rows={len(model)} colours={len(colors)}")
     return Store(profile=profile, games=games, model_row=model.row(0, named=True),
-                 loaded_at=time.monotonic())
+                 loaded_at=time.monotonic(), colors=colors)
 
 
 async def _get_store() -> Store:
@@ -210,10 +237,15 @@ def _profile_row(profile: pl.DataFrame, season: int, through_week: int, team: st
     return hit.row(0, named=True)
 
 
-def _team_record(row: dict) -> CfbTeamRecord:
+def _team_record(row: dict, color: str) -> CfbTeamRecord:
     return CfbTeamRecord(team=row["team"], conference=row.get("conference"),
                          wins=int(row.get("wins") or 0), losses=int(row.get("losses") or 0),
-                         games_played=int(row.get("games") or 0))
+                         games_played=int(row.get("games") or 0), color=color)
+
+
+def _pair_colors(store: Store, home_team: str, away_team: str) -> tuple[str, str]:
+    return resolve_pair(store.colors.get(home_team, (None, None)),
+                        store.colors.get(away_team, (None, None)))
 
 
 def _data_through_date(games: pl.DataFrame, season: int, through_week: int) -> Optional[str]:
@@ -249,6 +281,7 @@ async def run_matchup(req: CfbMatchupRequest) -> CfbMatchupResponse:
     home = _profile_row(store.profile, season, through_week, req.home_team)
     away = _profile_row(store.profile, season, through_week, req.away_team)
     home_field = 0.0 if req.neutral_site else 1.0
+    home_color, away_color = _pair_colors(store, home["team"], away["team"])
     prediction = predict(
         store.model_row,
         float(home["elo"]) - float(away["elo"]),
@@ -259,7 +292,7 @@ async def run_matchup(req: CfbMatchupRequest) -> CfbMatchupResponse:
         season=season, through_week=through_week,
         data_through_date=_data_through_date(store.games, season, through_week),
         neutral_site=req.neutral_site,
-        home=_team_record(home), away=_team_record(away),
+        home=_team_record(home, home_color), away=_team_record(away, away_color),
         prediction=prediction,
         model=model_record(store.model_row),
         comparison=build_radar(
@@ -292,6 +325,7 @@ async def run_slate(week: Optional[int]) -> CfbSlateResponse:
         p = predict(store.model_row, elo_diff,
                     float(home["adj_margin"]) - float(away["adj_margin"]),
                     0.0 if g["neutral_site"] else 1.0)
+        slate_home_color, slate_away_color = _pair_colors(store, g["home_team"], g["away_team"])
         out.append(CfbSlateGame(
             game_id=int(g["id"]), week=int(g["week"]),
             start_date=str(g["start_date"])[:10] if g["start_date"] is not None else None,
@@ -299,6 +333,7 @@ async def run_slate(week: Optional[int]) -> CfbSlateResponse:
             home_win_prob=p.home_win_prob,
             projected_home_points=p.projected_home_points,
             projected_away_points=p.projected_away_points,
+            home_color=slate_home_color, away_color=slate_away_color,
         ))
     return CfbSlateResponse(
         season=season, week=target_week, through_week=through_week,

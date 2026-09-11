@@ -109,3 +109,30 @@ class TestResolvePair:
         notre_dame = ("#0c2340", "#c99700")
         home, away = resolve_pair(PENN_STATE, notre_dame)
         assert delta_e(home, away) >= SIMILARITY_DELTA_E
+
+
+class TestStoreIntegration:
+    """The colour lookup has to survive cfb_teams being absent or incomplete."""
+
+    def test_pair_colors_falls_back_to_neutral_for_unknown_schools(self):
+        from workflows.cfb.matchup import Store, _pair_colors
+        store = Store(profile=None, games=None, model_row={}, loaded_at=0.0, colors={})
+        home, away = _pair_colors(store, "Tennessee", "Georgia Tech")
+        assert home == NEUTRAL
+        assert away == NEUTRAL
+
+    def test_pair_colors_uses_the_store_when_present(self):
+        from workflows.cfb.matchup import Store, _pair_colors
+        store = Store(profile=None, games=None, model_row={}, loaded_at=0.0,
+                      colors={"Tennessee": TENNESSEE, "Georgia Tech": GEORGIA_TECH})
+        home, away = _pair_colors(store, "Tennessee", "Georgia Tech")
+        assert home == "#ff8200"
+        assert away == "#b3a369"
+
+    def test_one_known_and_one_unknown_school_still_resolves(self):
+        from workflows.cfb.matchup import Store, _pair_colors
+        store = Store(profile=None, games=None, model_row={}, loaded_at=0.0,
+                      colors={"Tennessee": TENNESSEE})
+        home, away = _pair_colors(store, "Tennessee", "Nowhere State")
+        assert home == "#ff8200"
+        assert away == NEUTRAL
