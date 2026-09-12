@@ -244,6 +244,18 @@ class CfbTeamRecord(BaseModel):
     # Rendered brand colour, already paired against the opponent and lifted
     # to stay legible on the dark chart background. See workflows/cfb/colors.py.
     color: str
+    # CORE efficiency as of the same week, in points per 100 plays. Offence is
+    # points created above average, defence is points *allowed* above average
+    # (so lower is better), overall is offence minus defence. Null when the
+    # ratings table has not been built.
+    core_off: Optional[float] = None
+    core_def: Optional[float] = None
+    core_overall: Optional[float] = None
+    # Percentile among FBS teams at the same week, outward-is-better for all
+    # three, so the UI never has to know which way a metric points.
+    core_off_pct: Optional[float] = None
+    core_def_pct: Optional[float] = None
+    core_overall_pct: Optional[float] = None
 
 
 class CfbPrediction(BaseModel):

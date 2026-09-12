@@ -150,13 +150,15 @@ class Store:
     # school -> (primary, alternate). Empty if cfb_teams has not been built
     # yet, in which case every side renders in the neutral.
     colors: dict[str, tuple[Optional[str], Optional[str]]] = field(default_factory=dict)
+    # CORE efficiency by (season, through_week, team). Empty if not built.
+    core: Optional[pl.DataFrame] = None
 
 
 _store: Optional[Store] = None
 _store_lock = asyncio.Lock()
 
 _PATHS = {"profile": "cfb/team_profile", "games": "cfb/games", "model": "cfb/model",
-          "teams": "cfb/teams"}
+          "teams": "cfb/teams", "core": "cfb/core_ratings"}
 
 
 def _storage_options() -> dict:
@@ -195,6 +197,65 @@ def _load_colors() -> dict[str, tuple[Optional[str], Optional[str]]]:
     }
 
 
+def _load_core() -> Optional[pl.DataFrame]:
+    """As-of CORE ratings. Optional — the matchup works fine without them."""
+    try:
+        return _read("core")
+    except Exception as e:
+        logger.warning(f"cfb matchup: no CORE ratings available ({e})")
+        return None
+
+
+CORE_FIELDS = ("core_off", "core_def", "core_overall",
+               "core_off_pct", "core_def_pct", "core_overall_pct")
+
+
+def core_for(store: Store, season: int, through_week: int, team: str) -> dict:
+    """One team's CORE ratings plus its percentile among FBS at the same week.
+
+    Percentiles are stated outward-is-better for all three, so the UI never has
+    to remember that `core_def` counts points allowed and therefore ranks in
+    reverse.
+    """
+    empty = {f: None for f in CORE_FIELDS}
+    core = store.core
+    if core is None or core.is_empty():
+        return empty
+    week_rows = core.filter((pl.col("season") == season) & (pl.col("through_week") == through_week))
+    if week_rows.is_empty():
+        return empty
+    mine = week_rows.filter(pl.col("team") == team)
+    if mine.is_empty():
+        return empty
+    row = mine.row(0, named=True)
+
+    def pct(column: str, higher_is_better: bool) -> Optional[float]:
+        """Rank percentile: best in the field is 100, worst is 0.
+
+        Ranking rather than "fraction strictly below" so the leader reaches the
+        rim of a 0-100 radar instead of stopping at (n-1)/n. A field of one has
+        no ranking to express, so it sits at the midpoint.
+        """
+        value = row.get(column)
+        if value is None:
+            return None
+        series = week_rows[column].drop_nulls()
+        if series.is_empty():
+            return None
+        if series.len() == 1:
+            return 50.0
+        beaten = (series < value).sum() if higher_is_better else (series > value).sum()
+        return round(100.0 * beaten / (series.len() - 1), 1)
+
+    return {
+        "core_off": row["core_off"], "core_def": row["core_def"],
+        "core_overall": row["core_overall"],
+        "core_off_pct": pct("core_off", True),
+        "core_def_pct": pct("core_def", False),     # points allowed: lower is better
+        "core_overall_pct": pct("core_overall", True),
+    }
+
+
 def _load_store() -> Store:
     profile = _read("profile")
     games = _read("games")
@@ -202,10 +263,12 @@ def _load_store() -> Store:
     if model.is_empty():
         raise CfbMatchupError("cfb_model is empty — run pipeline_cfb_model.py")
     colors = _load_colors()
+    core = _load_core()
     logger.info(f"cfb matchup: loaded profile={len(profile)} games={len(games)} "
-                f"model rows={len(model)} colours={len(colors)}")
+                f"model rows={len(model)} colours={len(colors)} "
+                f"core={0 if core is None else len(core)}")
     return Store(profile=profile, games=games, model_row=model.row(0, named=True),
-                 loaded_at=time.monotonic(), colors=colors)
+                 loaded_at=time.monotonic(), colors=colors, core=core)
 
 
 async def _get_store() -> Store:
@@ -245,10 +308,11 @@ def _profile_row(profile: pl.DataFrame, season: int, through_week: int, team: st
     return hit.row(0, named=True)
 
 
-def _team_record(row: dict, color: str) -> CfbTeamRecord:
+def _team_record(row: dict, color: str, core: Optional[dict] = None) -> CfbTeamRecord:
     return CfbTeamRecord(team=row["team"], conference=row.get("conference"),
                          wins=int(row.get("wins") or 0), losses=int(row.get("losses") or 0),
-                         games_played=int(row.get("games") or 0), color=color)
+                         games_played=int(row.get("games") or 0), color=color,
+                         **(core or {}))
 
 
 def _pair_colors(store: Store, home_team: str, away_team: str) -> tuple[str, str]:
@@ -301,7 +365,8 @@ async def run_matchup(req: CfbMatchupRequest) -> CfbMatchupResponse:
         season=season, through_week=through_week,
         data_through_date=_data_through_date(store.games, season, through_week),
         neutral_site=req.neutral_site,
-        home=_team_record(home, home_color), away=_team_record(away, away_color),
+        home=_team_record(home, home_color, core_for(store, season, through_week, home["team"])),
+        away=_team_record(away, away_color, core_for(store, season, through_week, away["team"])),
         prediction=prediction,
         model=model_record(store.model_row),
         comparison=build_radar(
