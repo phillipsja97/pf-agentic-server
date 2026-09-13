@@ -257,3 +257,21 @@ def test_load_store_reads_three_tables_and_latest_model_row(monkeypatch):
         store = m._load_store()
     assert store.model_row["win_intercept"] == 9.0
     assert store.profile["team"].to_list() == ["Georgia"]
+
+
+def test_the_total_head_reads_its_own_sum_features():
+    row = dict(MODEL_ROW, total_b_off_sum=0.5, total_b_def_sum=-0.5)
+    flat = predict(row, elo_diff=0.0, adj_diff=0.0, home_field=0.0)
+    hot = predict(row, elo_diff=0.0, adj_diff=0.0, home_field=0.0, off_sum=20.0, def_sum=-10.0)
+    # Two strong offences and two weak defences: same margin, more points.
+    assert hot.expected_margin == pytest.approx(flat.expected_margin)
+    assert hot.projected_home_points + hot.projected_away_points == \
+        pytest.approx(flat.projected_home_points + flat.projected_away_points + 15.0)
+
+
+def test_sum_features_never_leak_into_the_win_or_margin_heads():
+    row = dict(MODEL_ROW, total_b_off_sum=0.5, total_b_def_sum=-0.5)
+    a = predict(row, elo_diff=50.0, adj_diff=2.0, home_field=1.0)
+    b = predict(row, elo_diff=50.0, adj_diff=2.0, home_field=1.0, off_sum=30.0, def_sum=30.0)
+    assert a.home_win_prob == pytest.approx(b.home_win_prob)
+    assert a.expected_margin == pytest.approx(b.expected_margin)
