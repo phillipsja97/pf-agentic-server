@@ -19,8 +19,13 @@ class TestDeltaE:
         # The motivating case: different hex, obviously "the same orange".
         assert delta_e("#ff8200", "#f56600") < SIMILARITY_DELTA_E
 
-    def test_tennessee_orange_and_georgia_tech_gold_are_distinct(self):
-        assert delta_e("#ff8200", "#b3a369") > SIMILARITY_DELTA_E
+    def test_tennessee_orange_and_georgia_tech_gold_are_too_close(self):
+        # The pair that exposed CIE76: 61 apart in CIELAB, 13.6 in OKLab, and
+        # genuinely hard to tell apart on the page.
+        assert delta_e("#ff8200", "#b3a369") < SIMILARITY_DELTA_E
+
+    def test_michigan_navy_and_ohio_state_scarlet_are_distinct(self):
+        assert delta_e("#00274c", "#bb0000") > SIMILARITY_DELTA_E
 
     def test_is_symmetric(self):
         assert delta_e("#ff8200", "#b3a369") == pytest.approx(delta_e("#b3a369", "#ff8200"))
@@ -50,14 +55,23 @@ class TestEnsureLegible:
         # Georgia crimson should still read as crimson, not pink.
         out = ensure_legible("#ba0c2f")
         assert contrast_ratio(out, BACKGROUND) == pytest.approx(CONTRAST_FLOOR, abs=0.15)
-        assert delta_e(out, "#ba0c2f") < 25
+        assert delta_e(out, "#ba0c2f") < 25   # lifting for contrast is not a hue change
 
 
 class TestResolvePair:
     def test_distinct_colors_both_keep_their_primary(self):
+        home, away = resolve_pair(TENNESSEE, ("#00274c", "#ffcb05"))   # Michigan
+        assert home == "#ff8200"
+        assert delta_e(away, "#00274c") < 25   # still Michigan's navy, only lifted
+        assert away != NEUTRAL
+
+    def test_gold_at_orange_falls_back_to_the_alternate(self):
+        # Georgia Tech's gold reads as Tennessee's orange on the page; the
+        # navy alternate is what the viewer needs.
         home, away = resolve_pair(TENNESSEE, GEORGIA_TECH)
         assert home == "#ff8200"
-        assert away == "#b3a369"
+        assert delta_e(away, home) >= SIMILARITY_DELTA_E
+        assert delta_e(away, GEORGIA_TECH[1]) < 25
 
     def test_similar_primaries_send_the_away_team_to_its_alternate(self):
         # Tennessee AT Clemson: Clemson is home and keeps its orange.
@@ -127,7 +141,11 @@ class TestStoreIntegration:
                       colors={"Tennessee": TENNESSEE, "Georgia Tech": GEORGIA_TECH})
         home, away = _pair_colors(store, "Tennessee", "Georgia Tech")
         assert home == "#ff8200"
-        assert away == "#b3a369"
+        # Gold is too close to orange, so Georgia Tech falls back to its navy,
+        # lifted to clear the contrast floor.
+        assert away != "#b3a369"
+        assert delta_e(away, home) >= SIMILARITY_DELTA_E
+        assert contrast_ratio(away, BACKGROUND) >= CONTRAST_FLOOR
 
     def test_one_known_and_one_unknown_school_still_resolves(self):
         from workflows.cfb.matchup import Store, _pair_colors

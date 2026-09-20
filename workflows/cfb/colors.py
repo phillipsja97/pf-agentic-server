@@ -9,8 +9,14 @@ Two problems have to be solved together:
 
 2. **Telling the two sides apart.** Plenty of schools share a colour — Air
    Force and Pittsburgh are the same navy to the byte, and Tennessee's orange
-   sits a mere 12.6 ΔE from Clemson's. The home team keeps its primary; a too-
-   close away team falls back to its alternate, then to a neutral grey.
+   sits 6.8 ΔE from Clemson's. The home team keeps its primary; a too-close
+   away team falls back to its alternate, then to a neutral grey.
+
+   Distance is measured in OKLab, not CIELAB. CIE76 badly overstates the gap
+   between saturated warm colours: it put Georgia Tech's gold 61 units from
+   Tennessee's orange and Clemson's orange 23 from it, so both pairs sailed
+   through a threshold of 15 — and both are hard to tell apart on the page.
+   OKLab scores them 13.6 and 6.8, which is what a viewer sees.
 
 Similarity is judged on the *lifted* colours, because those are what a viewer
 actually sees: two different navies that lift to the same blue still collide.
@@ -24,8 +30,10 @@ BACKGROUND = "#201D1D"
 # WCAG 2.1 non-text contrast minimum for graphical objects.
 CONTRAST_FLOOR = 3.0
 
-# CIELAB ΔE below which two colours read as "the same". Tennessee/Clemson is
-# 12.6; Tennessee/Georgia Tech is 61.
+# OKLab distance (x100) below which two colours are too close to tell apart
+# with normal colour vision. 15 is the floor the dataviz palette validator
+# uses; Tennessee/Georgia Tech scores 13.6 and Tennessee/Clemson 6.8, while
+# Michigan/Ohio State is a comfortable 27.
 SIMILARITY_DELTA_E = 15.0
 
 # Shown when a team has no usable colour left. Matches the UI's away-grey.
@@ -66,20 +74,19 @@ def contrast_ratio(a: str, b: str) -> float:
     return (hi + 0.05) / (lo + 0.05)
 
 
-def _to_lab(hex_color: str) -> Tuple[float, float, float]:
-    r, g, b = (_srgb_to_linear(c) for c in _parse(hex_color))
-    x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047
-    y = 0.2126 * r + 0.7152 * g + 0.0722 * b
-    z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883
-    f = lambda t: t ** (1 / 3) if t > 0.008856 else 7.787 * t + 16 / 116
-    fx, fy, fz = f(x), f(y), f(z)
-    return 116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)
+
+def _to_oklab(hex_color: str) -> Tuple[float, float, float]:
+    L, C, H = _to_oklch(hex_color)
+    return L, C * math.cos(H), C * math.sin(H)
 
 
 def delta_e(a: str, b: str) -> float:
-    """CIE76 colour difference. Good enough to answer 'same colour?'."""
-    la, lb = _to_lab(a), _to_lab(b)
-    return math.dist(la, lb)
+    """Perceptual colour difference: OKLab Euclidean distance, scaled by 100.
+
+    Scaled so the numbers sit on the familiar 0-100 ΔE range and match the
+    threshold the palette validator applies.
+    """
+    return 100.0 * math.dist(_to_oklab(a), _to_oklab(b))
 
 
 def _to_oklch(hex_color: str) -> Tuple[float, float, float]:
