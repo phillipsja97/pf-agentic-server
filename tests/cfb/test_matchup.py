@@ -275,3 +275,23 @@ def test_sum_features_never_leak_into_the_win_or_margin_heads():
     b = predict(row, elo_diff=50.0, adj_diff=2.0, home_field=1.0, off_sum=30.0, def_sum=30.0)
     assert a.home_win_prob == pytest.approx(b.home_win_prob)
     assert a.expected_margin == pytest.approx(b.expected_margin)
+
+
+def test_model_record_carries_the_benchmarks_when_present():
+    from workflows.cfb.matchup import model_record
+    row = {"accuracy": 0.72, "brier": 0.18, "log_loss": 0.54, "elo_accuracy": 0.70, "elo_brier": 0.19,
+           "calibration_bins": "[]", "trained_through_season": 2026, "shrink_k": 2,
+           "market_accuracy": 0.735, "sp_prior_accuracy": 0.666, "sp_final_accuracy": 0.774,
+           "fpi_prior_accuracy": 0.668, "fpi_final_accuracy": 0.783, "early_accuracy": 0.76}
+    m = model_record(row)
+    assert m.market_accuracy == pytest.approx(0.735)
+    assert m.sp_prior_accuracy == pytest.approx(0.666) and m.sp_final_accuracy == pytest.approx(0.774)
+    assert m.fpi_final_accuracy == pytest.approx(0.783)
+
+
+def test_model_record_tolerates_a_row_fitted_before_the_benchmarks_existed():
+    from workflows.cfb.matchup import model_record
+    row = {"accuracy": 0.72, "brier": 0.18, "log_loss": 0.54, "elo_accuracy": 0.70, "elo_brier": 0.19,
+           "calibration_bins": "[]", "trained_through_season": 2025, "shrink_k": 2}
+    m = model_record(row)
+    assert m.market_accuracy is None and m.sp_prior_accuracy is None

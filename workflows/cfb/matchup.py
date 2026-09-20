@@ -294,6 +294,11 @@ def model_record(model_row: dict) -> CfbModelRecord:
         calibration_bins=[CfbCalibrationBin(**b) for b in bins],
         trained_through_season=int(model_row["trained_through_season"]),
         shrink_k=int(model_row["shrink_k"]),
+        # Benchmarks are optional columns: a row fitted before they existed
+        # simply lacks them, and a null leaves that comparison off the page.
+        **{k: model_row.get(k) for k in (
+            "early_accuracy", "early_elo_accuracy", "market_accuracy",
+            "sp_prior_accuracy", "sp_final_accuracy", "fpi_prior_accuracy", "fpi_final_accuracy")},
     )
 
 

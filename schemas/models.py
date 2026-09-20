@@ -283,6 +283,20 @@ class CfbModelRecord(BaseModel):
     calibration_bins: list[CfbCalibrationBin]
     trained_through_season: int
     shrink_k: int
+    # Weeks 1-4 alone, where the model leans hardest on last season.
+    early_accuracy: Optional[float] = None
+    early_elo_accuracy: Optional[float] = None
+    # Closing-line accuracy on the same held-out games. The strongest public
+    # predictor; null when betting lines have not been ingested.
+    market_accuracy: Optional[float] = None
+    # SP+ and FPI are published only as end-of-season numbers, so each is a
+    # bracket: "prior" uses last season's final all season (leak-free, never
+    # updates, understates them); "final" uses this season's final (has seen
+    # every result, overstates them). In-season truth sits between.
+    sp_prior_accuracy: Optional[float] = None
+    sp_final_accuracy: Optional[float] = None
+    fpi_prior_accuracy: Optional[float] = None
+    fpi_final_accuracy: Optional[float] = None
 
 
 class CfbEdge(BaseModel):
