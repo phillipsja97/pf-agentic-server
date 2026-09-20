@@ -256,6 +256,12 @@ class CfbTeamRecord(BaseModel):
     core_off_pct: Optional[float] = None
     core_def_pct: Optional[float] = None
     core_overall_pct: Optional[float] = None
+    # What SP+ (Connelly) and FPI (ESPN) said about this team as of the same
+    # week. Null until the weekly snapshot has run for that week.
+    sp_rating: Optional[float] = None
+    sp_rank: Optional[float] = None
+    fpi: Optional[float] = None
+    fpi_rank: Optional[float] = None
 
 
 class CfbPrediction(BaseModel):

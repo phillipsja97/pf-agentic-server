@@ -156,13 +156,16 @@ class Store:
     colors: dict[str, tuple[Optional[str], Optional[str]]] = field(default_factory=dict)
     # CORE efficiency by (season, through_week, team). Empty if not built.
     core: Optional[pl.DataFrame] = None
+    # Weekly SP+/FPI snapshots by (season, through_week, team). Empty if not built.
+    ratings: Optional[pl.DataFrame] = None
 
 
 _store: Optional[Store] = None
 _store_lock = asyncio.Lock()
 
 _PATHS = {"profile": "cfb/team_profile", "games": "cfb/games", "model": "cfb/model",
-          "teams": "cfb/teams", "core": "cfb/core_ratings"}
+          "teams": "cfb/teams", "core": "cfb/core_ratings",
+          "ratings": "cfb/ratings_snapshots"}
 
 
 def _storage_options() -> dict:
@@ -199,6 +202,36 @@ def _load_colors() -> dict[str, tuple[Optional[str], Optional[str]]]:
         r["school"]: (r.get("color"), r.get("alternate_color"))
         for r in latest.to_dicts()
     }
+
+
+def _load_ratings() -> Optional[pl.DataFrame]:
+    """As-of SP+/FPI snapshots. Optional, like CORE."""
+    try:
+        return _read("ratings")
+    except Exception as e:
+        logger.warning(f"cfb matchup: no SP+/FPI snapshots available ({e})")
+        return None
+
+
+RATING_FIELDS = ("sp_rating", "sp_rank", "fpi", "fpi_rank")
+
+
+def ratings_for(store: Store, season: int, through_week: int, team: str) -> dict:
+    """The latest SP+/FPI snapshot for a team at or before `through_week`.
+
+    Snapshots are taken weekly, so the most recent one at or before the
+    prediction's own as-of week is what the ratings said before kickoff.
+    """
+    empty = {f: None for f in RATING_FIELDS}
+    r = store.ratings
+    if r is None or r.is_empty():
+        return empty
+    rows = r.filter((pl.col("season") == season) & (pl.col("through_week") <= through_week)
+                    & (pl.col("team") == team)).sort("through_week", descending=True)
+    if rows.is_empty():
+        return empty
+    row = rows.row(0, named=True)
+    return {f: row.get(f) for f in RATING_FIELDS}
 
 
 def _load_core() -> Optional[pl.DataFrame]:
@@ -268,11 +301,12 @@ def _load_store() -> Store:
         raise CfbMatchupError("cfb_model is empty — run pipeline_cfb_model.py")
     colors = _load_colors()
     core = _load_core()
+    ratings = _load_ratings()
     logger.info(f"cfb matchup: loaded profile={len(profile)} games={len(games)} "
                 f"model rows={len(model)} colours={len(colors)} "
-                f"core={0 if core is None else len(core)}")
+                f"core={0 if core is None else len(core)} ratings={0 if ratings is None else len(ratings)}")
     return Store(profile=profile, games=games, model_row=model.row(0, named=True),
-                 loaded_at=time.monotonic(), colors=colors, core=core)
+                 loaded_at=time.monotonic(), colors=colors, core=core, ratings=ratings)
 
 
 async def _get_store() -> Store:
@@ -317,11 +351,12 @@ def _profile_row(profile: pl.DataFrame, season: int, through_week: int, team: st
     return hit.row(0, named=True)
 
 
-def _team_record(row: dict, color: str, core: Optional[dict] = None) -> CfbTeamRecord:
+def _team_record(row: dict, color: str, core: Optional[dict] = None,
+                 ratings: Optional[dict] = None) -> CfbTeamRecord:
     return CfbTeamRecord(team=row["team"], conference=row.get("conference"),
                          wins=int(row.get("wins") or 0), losses=int(row.get("losses") or 0),
                          games_played=int(row.get("games") or 0), color=color,
-                         **(core or {}))
+                         **(core or {}), **(ratings or {}))
 
 
 def _pair_colors(store: Store, home_team: str, away_team: str) -> tuple[str, str]:
@@ -376,8 +411,10 @@ async def run_matchup(req: CfbMatchupRequest) -> CfbMatchupResponse:
         season=season, through_week=through_week,
         data_through_date=_data_through_date(store.games, season, through_week),
         neutral_site=req.neutral_site,
-        home=_team_record(home, home_color, core_for(store, season, through_week, home["team"])),
-        away=_team_record(away, away_color, core_for(store, season, through_week, away["team"])),
+        home=_team_record(home, home_color, core_for(store, season, through_week, home["team"]),
+                          ratings_for(store, season, through_week, home["team"])),
+        away=_team_record(away, away_color, core_for(store, season, through_week, away["team"]),
+                          ratings_for(store, season, through_week, away["team"])),
         prediction=prediction,
         model=model_record(store.model_row),
         comparison=build_radar(
