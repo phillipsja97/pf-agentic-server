@@ -309,6 +309,12 @@ def _load_store() -> Store:
                  loaded_at=time.monotonic(), colors=colors, core=core, ratings=ratings)
 
 
+def invalidate_cache() -> None:
+    """Drop the cached store so the next request reloads tables the ETL just wrote."""
+    global _store
+    _store = None
+
+
 async def _get_store() -> Store:
     global _store
     if _store is not None and time.monotonic() - _store.loaded_at < CACHE_TTL_SECONDS:

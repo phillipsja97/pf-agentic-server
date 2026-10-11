@@ -56,6 +56,7 @@ CollegeFootballData API — it has no `cfbd` dependency and no API key.
 | `POST /workflows/cfb/matchup` | **no LLM** — linear model over stored coefficients |
 | `GET /workflows/cfb/slate` | this week's games, each predicted |
 | `GET /workflows/cfb/teams` | team list for pickers |
+| `POST` / `GET /workflows/cfb/ingest` | **side effect:** runs `sports-etl`'s `pipeline_cfb_refresh.py` as a subprocess (`SPORTS_ETL_PATH`), one at a time; GET polls state, stage and log tail. Does not refit the model. Unauthenticated, like the rest of the sports routes |
 
 The two analysts load whole Delta tables into memory as PyArrow at first
 request and register them with DuckDB, so generated SQL uses plain table names,

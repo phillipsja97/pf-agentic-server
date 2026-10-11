@@ -364,3 +364,18 @@ class CfbSlateResponse(BaseModel):
 class CfbTeam(BaseModel):
     team: str
     conference: Optional[str] = None
+
+
+class CfbIngestRequest(BaseModel):
+    year: Optional[int] = None
+
+
+class CfbIngestStatus(BaseModel):
+    state: Literal["idle", "running", "completed", "failed"] = "idle"
+    year: Optional[int] = None
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    stage: Optional[str] = None
+    budget: Optional[str] = None
+    exit_code: Optional[int] = None
+    log_tail: list[str] = []
