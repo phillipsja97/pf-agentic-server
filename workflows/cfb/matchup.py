@@ -16,6 +16,7 @@ from deltalake import DeltaTable
 
 from config import settings
 from core.logging import logger
+from workflows.cfb import predictions
 from workflows.cfb.colors import resolve_pair
 from schemas.models import (
     CfbCalibrationBin, CfbEdge, CfbH2HGame, CfbMatchupRequest, CfbMatchupResponse,
@@ -162,6 +163,9 @@ class Store:
 
 _store: Optional[Store] = None
 _store_lock = asyncio.Lock()
+# Appends to cfb_predictions are serialised so two concurrent slate requests
+# cannot both decide the same game is unstored and write it twice.
+_predictions_lock = asyncio.Lock()
 
 _PATHS = {"profile": "cfb/team_profile", "games": "cfb/games", "model": "cfb/model",
           "teams": "cfb/teams", "core": "cfb/core_ratings",
@@ -466,11 +470,32 @@ async def run_slate(week: Optional[int]) -> CfbSlateResponse:
             projected_away_points=p.projected_away_points,
             home_color=slate_home_color, away_color=slate_away_color,
         ))
+    await _store_slate_predictions(out, season, through_week, store.model_row)
     return CfbSlateResponse(
         season=season, week=target_week, through_week=through_week,
         data_through_date=_data_through_date(store.games, season, through_week),
         games=out,
     )
+
+
+async def _store_slate_predictions(games: list[CfbSlateGame], season: int, through_week: int,
+                                   model_row: dict) -> None:
+    """Persist what the slate just served, so the backtest can score it later.
+
+    Best effort in both directions: the write itself swallows its failures (see
+    workflows.cfb.predictions.write) and anything that escapes it is logged
+    here. A prediction that cannot be stored must not cost the caller the
+    slate it asked for.
+    """
+    if not games:
+        return
+    rows = predictions.rows_for_slate(games, season=season, through_week=through_week,
+                                      model_row=model_row)
+    try:
+        async with _predictions_lock:
+            await asyncio.to_thread(predictions.write, rows)
+    except Exception as e:
+        logger.warning(f"cfb slate: could not store predictions ({e})")
 
 
 async def list_teams() -> list[CfbTeam]:

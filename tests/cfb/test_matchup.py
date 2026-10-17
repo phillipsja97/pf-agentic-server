@@ -206,7 +206,8 @@ def test_run_matchup_unknown_team_raises_with_suggestions(fake_store):
 
 
 def test_run_slate_defaults_to_next_week_and_uses_game_elo(fake_store):
-    resp = asyncio.run(run_slate(None))
+    with patch("workflows.cfb.predictions.write"):
+        resp = asyncio.run(run_slate(None))
     assert resp.season == 2026 and resp.through_week == 2 and resp.week == 3
     assert [g.home_team for g in resp.games] == ["Georgia", "Alabama"]
     g1 = resp.games[0]
@@ -295,3 +296,31 @@ def test_model_record_tolerates_a_row_fitted_before_the_benchmarks_existed():
            "calibration_bins": "[]", "trained_through_season": 2025, "shrink_k": 2}
     m = model_record(row)
     assert m.market_accuracy is None and m.sp_prior_accuracy is None
+
+
+# --- the slate persists what it serves ---
+
+def test_run_slate_stores_its_predictions(fake_store):
+    written = []
+    with patch("workflows.cfb.predictions.write", side_effect=lambda rows: written.extend(rows)):
+        resp = asyncio.run(run_slate(None))
+    assert len(written) == len(resp.games) == 2
+    r = written[0]
+    assert r["game_id"] == resp.games[0].game_id
+    assert r["season"] == 2026 and r["week"] == 3 and r["through_week"] == 2
+    assert r["home_win_prob"] == pytest.approx(resp.games[0].home_win_prob)
+    assert r["expected_margin"] == pytest.approx(
+        resp.games[0].projected_home_points - resp.games[0].projected_away_points)
+
+
+def test_a_failing_prediction_write_does_not_fail_the_slate(fake_store):
+    with patch("workflows.cfb.predictions.write", side_effect=OSError("minio down")):
+        resp = asyncio.run(run_slate(None))
+    assert len(resp.games) == 2
+
+
+def test_an_empty_slate_writes_nothing(fake_store):
+    with patch("workflows.cfb.predictions.write") as w:
+        resp = asyncio.run(run_slate(9))
+    assert resp.games == []
+    w.assert_not_called()

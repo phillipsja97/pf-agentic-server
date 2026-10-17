@@ -6,6 +6,7 @@ from core.logging import logger
 from core.storage.jobs import create_job, get_job, list_jobs
 from schemas.models import (
     CfbAnalystRequest,
+    CfbBacktestResponse,
     CfbIngestRequest,
     CfbIngestStatus,
     CfbMatchupRequest,
@@ -30,6 +31,7 @@ from workflows.cfb.ingest import (
     start as start_cfb_ingest,
 )
 from workflows.cfb.analyst import run_cfb_analyst, CfbAnalystError
+from workflows.cfb.backtest import run_backtest as run_cfb_backtest
 from workflows.cfb.matchup import (
     run_matchup as run_cfb_matchup,
     run_slate as run_cfb_slate,
@@ -184,6 +186,14 @@ async def cfb_matchup(request: CfbMatchupRequest):
 async def cfb_slate(week: int | None = None):
     try:
         return await run_cfb_slate(week)
+    except CfbMatchupError as e:
+        return JSONResponse(status_code=422, content={"error": str(e), "suggestions": e.suggestions})
+
+
+@router.get("/cfb/backtest", response_model=CfbBacktestResponse)
+async def cfb_backtest(season: int | None = None, week: int | None = None):
+    try:
+        return await run_cfb_backtest(season, week)
     except CfbMatchupError as e:
         return JSONResponse(status_code=422, content={"error": str(e), "suggestions": e.suggestions})
 

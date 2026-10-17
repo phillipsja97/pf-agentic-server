@@ -361,6 +361,72 @@ class CfbSlateResponse(BaseModel):
     games: list[CfbSlateGame]
 
 
+class CfbBacktestGame(BaseModel):
+    """One scored game: what was predicted before kickoff against the final."""
+    game_id: int
+    week: int
+    date: Optional[str] = None
+    home_team: str
+    away_team: str
+    neutral_site: bool
+    # "stored" = read back from cfb_predictions, i.e. what the slate served.
+    # "replayed" = rebuilt from the profile snapshot as of through_week.
+    source: Literal["stored", "replayed"]
+    through_week: int
+    # The model that made it: cfb_model.fitted_at.
+    fitted_at: Optional[str] = None
+    home_win_prob: float
+    projected_home_points: float
+    projected_away_points: float
+    expected_margin: float
+    actual_home_points: int
+    actual_away_points: int
+    actual_margin: int
+    actual_total: int
+    margin_error: float
+    total_error: float
+    straight_up_correct: bool
+
+
+class CfbBacktestMetrics(BaseModel):
+    games: int
+    straight_up_accuracy: Optional[float] = None
+    brier: Optional[float] = None
+    margin_mae: Optional[float] = None
+    margin_median_abs_error: Optional[float] = None
+    margin_bias: Optional[float] = None
+    within_3: Optional[float] = None
+    within_7: Optional[float] = None
+    within_10: Optional[float] = None
+    within_14: Optional[float] = None
+    total_mae: Optional[float] = None
+    total_bias: Optional[float] = None
+    home_score_mae: Optional[float] = None
+    home_score_bias: Optional[float] = None
+    away_score_mae: Optional[float] = None
+    away_score_bias: Optional[float] = None
+
+
+class CfbBacktestWeek(CfbBacktestMetrics):
+    week: int
+
+
+class CfbBacktestResponse(BaseModel):
+    season: int
+    week: Optional[int] = None
+    # The model the replayed rows were computed with: cfb_model.fitted_at.
+    fitted_at: Optional[str] = None
+    trained_through_season: Optional[int] = None
+    data_through_date: Optional[str] = None
+    stored_games: int
+    replayed_games: int
+    # Completed games with no as-of profile snapshot to predict from.
+    skipped_games: int
+    overall: CfbBacktestMetrics
+    by_week: list[CfbBacktestWeek]
+    games: list[CfbBacktestGame]
+
+
 class CfbTeam(BaseModel):
     team: str
     conference: Optional[str] = None
