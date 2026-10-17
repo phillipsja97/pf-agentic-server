@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     minio_secret_key: str = ""
     minio_bucket: str = "sports-data"
 
+    # Checkout of sports-etl that the CFB ingest button runs.
+    sports_etl_path: Path = Path.home() / "Projects" / "sports-stats" / "sports-etl"
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 

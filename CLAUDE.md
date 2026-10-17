@@ -55,11 +55,20 @@ CollegeFootballData API — it has no `cfbd` dependency and no API key.
 | `POST /workflows/cfb-analyst` | same, for college football |
 | `POST /workflows/cfb/matchup` | **no LLM** — linear model over stored coefficients |
 | `GET /workflows/cfb/slate` | this week's games, each predicted |
+| `GET /workflows/cfb/backtest` | scores stored predictions against finals; replays any game with none stored, and flags each row `stored` or `replayed` |
 | `GET /workflows/cfb/teams` | team list for pickers |
+| `POST` / `GET /workflows/cfb/ingest` | **side effect:** runs `sports-etl`'s `pipeline_cfb_refresh.py` as a subprocess (`SPORTS_ETL_PATH`), one at a time; GET polls state, stage and log tail. Does not refit the model. Unauthenticated, like the rest of the sports routes |
 
 The two analysts load whole Delta tables into memory as PyArrow at first
 request and register them with DuckDB, so generated SQL uses plain table names,
 not `delta_scan()`. They cache forever.
+
+`GET /workflows/cfb/slate` also **writes**: every prediction it serves is
+appended to `cfb_predictions` (`workflows/cfb/predictions.py`), append-only and
+idempotent on (game_id, model fitted_at, through_week). This is the one table
+agentic-server writes — a prediction is an artifact of serving, so the ETL
+cannot know what the server showed. The write can never fail the request, and
+tests must not reach it (`tests/cfb/conftest.py` blocks the I/O).
 
 `workflows/cfb/matchup.py` is different: it reads `cfb_team_profile`,
 `cfb_model` and `cfb_games` into a **30-minute TTL** cache, because the weekly

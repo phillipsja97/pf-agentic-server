@@ -6,6 +6,9 @@ from core.logging import logger
 from core.storage.jobs import create_job, get_job, list_jobs
 from schemas.models import (
     CfbAnalystRequest,
+    CfbBacktestResponse,
+    CfbIngestRequest,
+    CfbIngestStatus,
     CfbMatchupRequest,
     CfbMatchupResponse,
     CfbSlateResponse,
@@ -21,7 +24,14 @@ from schemas.models import (
     SoccerAnalystResponse,
 )
 from workflows.soccer.analyst import run_soccer_analyst, SoccerAnalystError
+from workflows.cfb.ingest import (
+    IngestBusy,
+    IngestUnavailable,
+    snapshot as cfb_ingest_status,
+    start as start_cfb_ingest,
+)
 from workflows.cfb.analyst import run_cfb_analyst, CfbAnalystError
+from workflows.cfb.backtest import run_backtest as run_cfb_backtest
 from workflows.cfb.matchup import (
     run_matchup as run_cfb_matchup,
     run_slate as run_cfb_slate,
@@ -180,9 +190,32 @@ async def cfb_slate(week: int | None = None):
         return JSONResponse(status_code=422, content={"error": str(e), "suggestions": e.suggestions})
 
 
+@router.get("/cfb/backtest", response_model=CfbBacktestResponse)
+async def cfb_backtest(season: int | None = None, week: int | None = None):
+    try:
+        return await run_cfb_backtest(season, week)
+    except CfbMatchupError as e:
+        return JSONResponse(status_code=422, content={"error": str(e), "suggestions": e.suggestions})
+
+
 @router.get("/cfb/teams", response_model=list[CfbTeam])
 async def cfb_teams():
     return await list_cfb_teams()
+
+
+@router.get("/cfb/ingest", response_model=CfbIngestStatus)
+async def cfb_ingest_state():
+    return cfb_ingest_status()
+
+
+@router.post("/cfb/ingest", response_model=CfbIngestStatus, status_code=202)
+async def cfb_ingest(request: CfbIngestRequest):
+    try:
+        return start_cfb_ingest(request.year)
+    except IngestBusy as e:
+        return JSONResponse(status_code=409, content={"error": str(e)})
+    except IngestUnavailable as e:
+        return JSONResponse(status_code=503, content={"error": str(e)})
 
 
 @router.get("/", response_model=list[JobStatusResponse])

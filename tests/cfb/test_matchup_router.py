@@ -16,7 +16,7 @@ def client():
 
 def _matchup():
     def rec(t):
-        return CfbTeamRecord(team=t, conference="SEC", wins=2, losses=0, games_played=2)
+        return CfbTeamRecord(team=t, conference="SEC", wins=2, losses=0, games_played=2, color="#ff8200")
     return CfbMatchupResponse(
         season=2026, through_week=2, data_through_date="2026-09-05", neutral_site=False,
         home=rec("Georgia"), away=rec("Alabama"),
@@ -74,3 +74,44 @@ def test_teams_is_get(client):
         r = client.get("/workflows/cfb/teams")
     assert r.status_code == 200
     assert r.json() == [{"team": "Georgia", "conference": "SEC"}]
+
+
+def _backtest(**kw):
+    from schemas.models import CfbBacktestMetrics, CfbBacktestResponse
+    base = dict(season=2026, week=None, fitted_at="2026-10-01T00:00:00",
+                trained_through_season=2026, data_through_date="2026-10-11",
+                stored_games=12, replayed_games=317, skipped_games=4,
+                overall=CfbBacktestMetrics(games=329, straight_up_accuracy=0.754,
+                                           brier=0.1702, margin_mae=12.93,
+                                           margin_bias=-0.31, within_3=0.164,
+                                           within_7=0.328, total_mae=12.7,
+                                           total_bias=2.2),
+                by_week=[], games=[])
+    return CfbBacktestResponse(**{**base, **kw})
+
+
+def test_backtest_is_get_and_not_swallowed_by_job_id_route(client):
+    with patch("routers.workflows.run_cfb_backtest",
+               new=AsyncMock(return_value=_backtest())) as mock_run:
+        r = client.get("/workflows/cfb/backtest")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["overall"]["straight_up_accuracy"] == 0.754
+    assert body["stored_games"] == 12 and body["replayed_games"] == 317
+    mock_run.assert_awaited_once_with(None, None)
+
+
+def test_backtest_passes_season_and_week(client):
+    with patch("routers.workflows.run_cfb_backtest",
+               new=AsyncMock(return_value=_backtest(season=2025, week=4))) as mock_run:
+        r = client.get("/workflows/cfb/backtest?season=2025&week=4")
+    assert r.status_code == 200
+    mock_run.assert_awaited_once_with(2025, 4)
+
+
+def test_backtest_missing_data_is_422(client):
+    err = CfbMatchupError("No profile data for season 2030")
+    with patch("routers.workflows.run_cfb_backtest", new=AsyncMock(side_effect=err)):
+        r = client.get("/workflows/cfb/backtest?season=2030")
+    assert r.status_code == 422
+    assert r.json()["error"] == "No profile data for season 2030"

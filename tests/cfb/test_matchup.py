@@ -8,10 +8,16 @@ from workflows.cfb.matchup import (
 
 
 MODEL_ROW = {
-    "win_intercept": 0.0, "win_b_elo": 0.01, "win_b_adj": 0.1, "win_b_home": 0.5,
-    "margin_intercept": 0.0, "margin_b_elo": 0.04, "margin_b_adj": 0.6, "margin_b_home": 2.5,
-    "total_intercept": 50.0, "total_b_elo": 0.0, "total_b_adj": 0.0, "total_b_home": 0.0,
+    "win_intercept": 0.0, "win_b_elo_diff": 0.01, "win_b_adj_diff": 0.1,
+    "win_b_eff_diff": 2.0, "win_b_home_field": 0.5,
+    "margin_intercept": 0.0, "margin_b_elo_diff": 0.04, "margin_b_adj_diff": 0.6,
+    "margin_b_eff_diff": 0.0, "margin_b_home_field": 2.5,
+    "total_intercept": 50.0, "total_b_elo_diff": 0.0, "total_b_adj_diff": 0.0,
+    "total_b_eff_diff": 0.0, "total_b_home_field": 0.0,
 }
+
+# A row persisted before eff_diff existed, to prove old models still load.
+LEGACY_MODEL_ROW = {k: v for k, v in MODEL_ROW.items() if "eff_diff" not in k}
 
 
 def _row(team, **kw):
@@ -32,6 +38,18 @@ def test_predict_applies_all_three_heads():
     assert p.expected_margin == pytest.approx(0.04 * 100 + 0.6 * 5 + 2.5)   # 9.5
     assert p.projected_home_points == pytest.approx((50 + 9.5) / 2)
     assert p.projected_away_points == pytest.approx((50 - 9.5) / 2)
+
+
+def test_predict_uses_the_efficiency_feature():
+    base = predict(MODEL_ROW, elo_diff=0.0, adj_diff=0.0, home_field=0.0)
+    better = predict(MODEL_ROW, elo_diff=0.0, adj_diff=0.0, home_field=0.0, eff_diff=0.25)
+    assert better.home_win_prob > base.home_win_prob
+
+
+def test_a_model_row_without_the_efficiency_column_still_predicts():
+    # Coefficient columns absent from an older row are treated as zero.
+    p = predict(LEGACY_MODEL_ROW, elo_diff=100.0, adj_diff=5.0, home_field=1.0, eff_diff=0.9)
+    assert p.home_win_prob == pytest.approx(1 / (1 + math.exp(-2.0)))
 
 
 def test_predict_neutral_site_has_no_home_term():
@@ -188,7 +206,8 @@ def test_run_matchup_unknown_team_raises_with_suggestions(fake_store):
 
 
 def test_run_slate_defaults_to_next_week_and_uses_game_elo(fake_store):
-    resp = asyncio.run(run_slate(None))
+    with patch("workflows.cfb.predictions.write"):
+        resp = asyncio.run(run_slate(None))
     assert resp.season == 2026 and resp.through_week == 2 and resp.week == 3
     assert [g.home_team for g in resp.games] == ["Georgia", "Alabama"]
     g1 = resp.games[0]
@@ -239,3 +258,69 @@ def test_load_store_reads_three_tables_and_latest_model_row(monkeypatch):
         store = m._load_store()
     assert store.model_row["win_intercept"] == 9.0
     assert store.profile["team"].to_list() == ["Georgia"]
+
+
+def test_the_total_head_reads_its_own_sum_features():
+    row = dict(MODEL_ROW, total_b_off_sum=0.5, total_b_def_sum=-0.5)
+    flat = predict(row, elo_diff=0.0, adj_diff=0.0, home_field=0.0)
+    hot = predict(row, elo_diff=0.0, adj_diff=0.0, home_field=0.0, off_sum=20.0, def_sum=-10.0)
+    # Two strong offences and two weak defences: same margin, more points.
+    assert hot.expected_margin == pytest.approx(flat.expected_margin)
+    assert hot.projected_home_points + hot.projected_away_points == \
+        pytest.approx(flat.projected_home_points + flat.projected_away_points + 15.0)
+
+
+def test_sum_features_never_leak_into_the_win_or_margin_heads():
+    row = dict(MODEL_ROW, total_b_off_sum=0.5, total_b_def_sum=-0.5)
+    a = predict(row, elo_diff=50.0, adj_diff=2.0, home_field=1.0)
+    b = predict(row, elo_diff=50.0, adj_diff=2.0, home_field=1.0, off_sum=30.0, def_sum=30.0)
+    assert a.home_win_prob == pytest.approx(b.home_win_prob)
+    assert a.expected_margin == pytest.approx(b.expected_margin)
+
+
+def test_model_record_carries_the_benchmarks_when_present():
+    from workflows.cfb.matchup import model_record
+    row = {"accuracy": 0.72, "brier": 0.18, "log_loss": 0.54, "elo_accuracy": 0.70, "elo_brier": 0.19,
+           "calibration_bins": "[]", "trained_through_season": 2026, "shrink_k": 2,
+           "market_accuracy": 0.735, "sp_prior_accuracy": 0.666, "sp_final_accuracy": 0.774,
+           "fpi_prior_accuracy": 0.668, "fpi_final_accuracy": 0.783, "early_accuracy": 0.76}
+    m = model_record(row)
+    assert m.market_accuracy == pytest.approx(0.735)
+    assert m.sp_prior_accuracy == pytest.approx(0.666) and m.sp_final_accuracy == pytest.approx(0.774)
+    assert m.fpi_final_accuracy == pytest.approx(0.783)
+
+
+def test_model_record_tolerates_a_row_fitted_before_the_benchmarks_existed():
+    from workflows.cfb.matchup import model_record
+    row = {"accuracy": 0.72, "brier": 0.18, "log_loss": 0.54, "elo_accuracy": 0.70, "elo_brier": 0.19,
+           "calibration_bins": "[]", "trained_through_season": 2025, "shrink_k": 2}
+    m = model_record(row)
+    assert m.market_accuracy is None and m.sp_prior_accuracy is None
+
+
+# --- the slate persists what it serves ---
+
+def test_run_slate_stores_its_predictions(fake_store):
+    written = []
+    with patch("workflows.cfb.predictions.write", side_effect=lambda rows: written.extend(rows)):
+        resp = asyncio.run(run_slate(None))
+    assert len(written) == len(resp.games) == 2
+    r = written[0]
+    assert r["game_id"] == resp.games[0].game_id
+    assert r["season"] == 2026 and r["week"] == 3 and r["through_week"] == 2
+    assert r["home_win_prob"] == pytest.approx(resp.games[0].home_win_prob)
+    assert r["expected_margin"] == pytest.approx(
+        resp.games[0].projected_home_points - resp.games[0].projected_away_points)
+
+
+def test_a_failing_prediction_write_does_not_fail_the_slate(fake_store):
+    with patch("workflows.cfb.predictions.write", side_effect=OSError("minio down")):
+        resp = asyncio.run(run_slate(None))
+    assert len(resp.games) == 2
+
+
+def test_an_empty_slate_writes_nothing(fake_store):
+    with patch("workflows.cfb.predictions.write") as w:
+        resp = asyncio.run(run_slate(9))
+    assert resp.games == []
+    w.assert_not_called()

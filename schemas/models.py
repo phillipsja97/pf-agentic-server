@@ -241,6 +241,27 @@ class CfbTeamRecord(BaseModel):
     wins: int
     losses: int
     games_played: int
+    # Rendered brand colour, already paired against the opponent and lifted
+    # to stay legible on the dark chart background. See workflows/cfb/colors.py.
+    color: str
+    # CORE efficiency as of the same week, in points per 100 plays. Offence is
+    # points created above average, defence is points *allowed* above average
+    # (so lower is better), overall is offence minus defence. Null when the
+    # ratings table has not been built.
+    core_off: Optional[float] = None
+    core_def: Optional[float] = None
+    core_overall: Optional[float] = None
+    # Percentile among FBS teams at the same week, outward-is-better for all
+    # three, so the UI never has to know which way a metric points.
+    core_off_pct: Optional[float] = None
+    core_def_pct: Optional[float] = None
+    core_overall_pct: Optional[float] = None
+    # What SP+ (Connelly) and FPI (ESPN) said about this team as of the same
+    # week. Null until the weekly snapshot has run for that week.
+    sp_rating: Optional[float] = None
+    sp_rank: Optional[float] = None
+    fpi: Optional[float] = None
+    fpi_rank: Optional[float] = None
 
 
 class CfbPrediction(BaseModel):
@@ -268,6 +289,20 @@ class CfbModelRecord(BaseModel):
     calibration_bins: list[CfbCalibrationBin]
     trained_through_season: int
     shrink_k: int
+    # Weeks 1-4 alone, where the model leans hardest on last season.
+    early_accuracy: Optional[float] = None
+    early_elo_accuracy: Optional[float] = None
+    # Closing-line accuracy on the same held-out games. The strongest public
+    # predictor; null when betting lines have not been ingested.
+    market_accuracy: Optional[float] = None
+    # SP+ and FPI are published only as end-of-season numbers, so each is a
+    # bracket: "prior" uses last season's final all season (leak-free, never
+    # updates, understates them); "final" uses this season's final (has seen
+    # every result, overstates them). In-season truth sits between.
+    sp_prior_accuracy: Optional[float] = None
+    sp_final_accuracy: Optional[float] = None
+    fpi_prior_accuracy: Optional[float] = None
+    fpi_final_accuracy: Optional[float] = None
 
 
 class CfbEdge(BaseModel):
@@ -314,6 +349,8 @@ class CfbSlateGame(BaseModel):
     home_win_prob: float
     projected_home_points: float
     projected_away_points: float
+    home_color: str
+    away_color: str
 
 
 class CfbSlateResponse(BaseModel):
@@ -324,6 +361,87 @@ class CfbSlateResponse(BaseModel):
     games: list[CfbSlateGame]
 
 
+class CfbBacktestGame(BaseModel):
+    """One scored game: what was predicted before kickoff against the final."""
+    game_id: int
+    week: int
+    date: Optional[str] = None
+    home_team: str
+    away_team: str
+    neutral_site: bool
+    # "stored" = read back from cfb_predictions, i.e. what the slate served.
+    # "replayed" = rebuilt from the profile snapshot as of through_week.
+    source: Literal["stored", "replayed"]
+    through_week: int
+    # The model that made it: cfb_model.fitted_at.
+    fitted_at: Optional[str] = None
+    home_win_prob: float
+    projected_home_points: float
+    projected_away_points: float
+    expected_margin: float
+    actual_home_points: int
+    actual_away_points: int
+    actual_margin: int
+    actual_total: int
+    margin_error: float
+    total_error: float
+    straight_up_correct: bool
+
+
+class CfbBacktestMetrics(BaseModel):
+    games: int
+    straight_up_accuracy: Optional[float] = None
+    brier: Optional[float] = None
+    margin_mae: Optional[float] = None
+    margin_median_abs_error: Optional[float] = None
+    margin_bias: Optional[float] = None
+    within_3: Optional[float] = None
+    within_7: Optional[float] = None
+    within_10: Optional[float] = None
+    within_14: Optional[float] = None
+    total_mae: Optional[float] = None
+    total_bias: Optional[float] = None
+    home_score_mae: Optional[float] = None
+    home_score_bias: Optional[float] = None
+    away_score_mae: Optional[float] = None
+    away_score_bias: Optional[float] = None
+
+
+class CfbBacktestWeek(CfbBacktestMetrics):
+    week: int
+
+
+class CfbBacktestResponse(BaseModel):
+    season: int
+    week: Optional[int] = None
+    # The model the replayed rows were computed with: cfb_model.fitted_at.
+    fitted_at: Optional[str] = None
+    trained_through_season: Optional[int] = None
+    data_through_date: Optional[str] = None
+    stored_games: int
+    replayed_games: int
+    # Completed games with no as-of profile snapshot to predict from.
+    skipped_games: int
+    overall: CfbBacktestMetrics
+    by_week: list[CfbBacktestWeek]
+    games: list[CfbBacktestGame]
+
+
 class CfbTeam(BaseModel):
     team: str
     conference: Optional[str] = None
+
+
+class CfbIngestRequest(BaseModel):
+    year: Optional[int] = None
+
+
+class CfbIngestStatus(BaseModel):
+    state: Literal["idle", "running", "completed", "failed"] = "idle"
+    year: Optional[int] = None
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    stage: Optional[str] = None
+    budget: Optional[str] = None
+    exit_code: Optional[int] = None
+    log_tail: list[str] = []
